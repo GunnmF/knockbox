@@ -46,4 +46,8 @@ jobs:
         run: pnpm tauri build --no-bundle
 
       - name: 单元测试
-        run: cargo test
+        # Cargo.toml 在 src-tauri/ 下，不加 working-directory 会在仓库根目录
+        # 找 Cargo.toml 找不到（"could not find `Cargo.toml`"）
+        # 用 --release 复用上一步已经编好的 release 产物，省掉一整轮 debug 编译
+        working-directory: src-tauri
+        run: cargo test --release
