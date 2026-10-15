@@ -35,11 +35,11 @@ jobs:
     name: macOS (Apple Silicon)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/action-setup@v4 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
         with:
           version: 11
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -70,13 +70,19 @@ jobs:
           # 是分支名（master），拿它当 tag 会建出一个叫 master 的 release
           VER=$(node -p "require('./package.json').version")
           TAG="v$VER"
-          D=src-tauri/target/release/bundle/macos
-          TARBALL=$(cd "$D" && ls *.app.tar.gz)
+          # 注意产物是分目录的，别把 dmg 也在 macos/ 里找：
+          #   bundle/macos/  → *.app、*.app.tar.gz（+ .sig，updater 实际用的）
+          #   bundle/dmg/    → *.dmg（给人手动下载的）
+          B=src-tauri/target/release/bundle
+          ls "$B"/macos/*.app.tar.gz "$B"/macos/*.app.tar.gz.sig >/dev/null \
+            || { echo "::error::没找到 updater 产物，确认 createUpdaterArtifacts 和签名私钥"; exit 1; }
+          TARBALL=$(cd "$B/macos" && ls *.app.tar.gz)
+          DMGS=$(cd "$B/dmg" && ls *.dmg)
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" "$D/$TARBALL" "$D/$TARBALL.sig" "$D"/*.dmg --clobber
+          gh release upload "$TAG" "$B/macos/$TARBALL" "$B/macos/$TARBALL.sig" $DMGS --clobber
           {
             echo "asset=$TARBALL"
-            echo "signature=$(cat "$D/$TARBALL.sig")"
+            echo "signature=$(cat "$B/macos/$TARBALL.sig")"
             echo "version=$VER"
           } >> "$GITHUB_OUTPUT"
 
@@ -84,11 +90,11 @@ jobs:
     name: Windows (x64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/action-setup@v4 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
         with:
           version: 11
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -106,21 +112,25 @@ jobs:
           $ErrorActionPreference = "Stop"
           $tag = "v" + (Get-Content package.json | ConvertFrom-Json).version
           $root = "src-tauri/target/release/bundle"
-          # NSIS 的 exe.zip 是 updater 实际用的产物（msi.zip 备用）
-          $zip = (Get-ChildItem "$root/nsis/*.zip" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1)
-          $sigPath = "$($zip.FullName).sig"
+          # NSIS 的 exe.zip 才是 Windows updater 认的产物
+          $zip = (Get-ChildItem "$root/nsis/*.zip" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1)
+          if (-not $zip) { throw "没有找到 $root/nsis/*.zip，确认 createUpdaterArtifacts 与签名私钥" }
+          if (-not (Test-Path "$($zip.FullName).sig")) { throw "缺少签名文件 $($zip.Name).sig" }
+          # 只传实际存在的产物：msi.zip 不一定会生成（Windows 更新只用 NSIS 的 zip），
+          # 写死路径传不存在的文件会让 gh 直接报错
+          $files = @(Get-ChildItem "$root/nsis/*.exe", "$root/nsis/*.zip", "$root/nsis/*.zip.sig", "$root/msi/*.msi", "$root/msi/*.zip", "$root/msi/*.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
           gh release view $tag *> $null; if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --generate-notes }
-          gh release upload $tag "$root/nsis/*.exe" "$root/msi/*.msi" "$root/nsis/*.zip" "$root/nsis/*.zip.sig" "$root/msi/*.zip" "$root/msi/*.zip.sig" --clobber
+          gh release upload $tag @files --clobber
           "asset=$($zip.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "signature=$((Get-Content $sigPath -Raw).Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signature=$((Get-Content "$($zip.FullName).sig" -Raw).Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
   publish-update-json:
     name: 生成 update.json
     needs: [macos, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
 

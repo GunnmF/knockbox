@@ -94,6 +94,15 @@
   - `pnpm publish-update` —— 本机构建 + 本机签名 + 上传（Windows 包需要先放进 `release-in/windows/`）
   - `pnpm sign-release` —— 只对 Release 上已有的产物签名并生成 update.json
 - 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
+- **产物目录是分开的，glob 一定要按目录来**：`bundle/macos/` 放 `*.app` 和
+  `*.app.tar.gz`(+`.sig`)，**dmg 在平级的 `bundle/dmg/`**；Windows 则是
+  `bundle/nsis/` 和 `bundle/msi/`。曾在上传步骤里写 `"$macos_dir"/*.dmg` 直接
+  `no matches found` 挂掉。另外 Windows 只认 NSIS 的 `exe.zip` 作为更新产物，
+  `msi.zip` 不保证生成 —— 上传步骤要用「存在才传」的方式，别写死路径
+- **想在 mac 上查 Windows 能不能编译**：`rustup target add x86_64-pc-windows-msvc`
+  然后 `cargo check --target x86_64-pc-windows-msvc`。**check 不链接**，所以不需要
+  装 MSVC 工具链，几分钟就能把跨平台编译错误全部暴露出来，比等 CI 快得多
+  （跨平台错误第一次就是靠它抓到的：`RunEvent::Reopen` 只在 macOS/iOS 有）
 - **dmg 打包偶发失败**：`bundle_dmg.sh` 中途崩掉时会把临时镜像
   （`target/release/bundle/macos/rw.*.dmg`）留在挂载状态，下一次构建直接挂。
   先 `hdiutil info | grep -i knockbox` 找出残留，`diskutil eject diskN` 推掉再重跑
@@ -316,6 +325,8 @@ cargo check && cargo test             # 10/10 通过
 | 15 | 覆盖层窗口 `set_size(PhysicalSize)` | 窗口生在 1x 外接屏时逻辑尺寸翻倍 —— v0.2.1 冻结帧**放大到屏幕外**，右下框选不到；改 builder 里给 `LogicalSize(size/scale)` |
 | 16 | 截图写死 `primary_monitor` | 多显示器用户在副屏唤起，截的却是主屏；改为光标所在屏 + `screencapture -D n` |
 | 17 | 文字输入框在画布 `pointerdown` 里创建，没 `preventDefault` | mousedown 默认行为在 React 处理器**之后**把焦点抢回画布，输入框当场失焦 → 空值提交销毁 → 文字工具"点了没反应"。**合成事件测不出来，只有真机 trusted 事件才复现** —— 浏览器测试要单独注意这一点 |
+| 18 | `lib.rs` 无条件 `match tauri::RunEvent::Reopen` | 该变体**只在 macOS/iOS 存在** → Windows 编译 E0599，整个 Windows job 编不出来（首次双平台 CI 才暴露） |
+| 19 | Windows 的 `screen_capture_full` 写死 PNG、只回 `path` | 「保存格式」设置在 Windows 上无效；插件拿不到图像就没法在自己的画布上标记（macOS 分支有 `dataUrl`）→ 两平台行为不一致，已对齐 |
 
 ### 🔴 仍未做：权限逐条确认（最大的模型空洞）
 

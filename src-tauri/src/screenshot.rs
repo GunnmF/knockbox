@@ -263,6 +263,9 @@ fn open_overlay_window(app: &AppHandle, monitor: Option<&tauri::Monitor>) -> Res
     if std::env::var_os("KNOCKBOX_PROBE").is_some() {
         url = "index.html?overlay=1&probe=text";
     }
+    // mut 只有 macOS 分支（下面重新赋值 builder）用得上，
+    // 其他平台会报 "variable does not need to be mutable"
+    #[allow(unused_mut)]
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         OVERLAY_LABEL,

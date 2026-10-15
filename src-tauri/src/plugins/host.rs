@@ -560,15 +560,26 @@ fn screen_capture_full(with_cursor: bool, format: &str) -> Result<Value, String>
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let path = dir.join(format!("截屏-{stamp}.png"));
+        // screencapture 的 -t 在这里是 ImageFormat 枚举名
+        let (ext, image_format, mime) = if format == "jpg" {
+            ("jpg", "Jpeg", "image/jpeg")
+        } else {
+            ("png", "Png", "image/png")
+        };
+        let path = dir.join(format!("截屏-{stamp}.{ext}"));
+        // with_cursor 在 Windows 上无法表达：CopyFromScreen 会把光标一起
+        // 画进位图，除非额外开 DXGI 桌面复制，那是另一个数量级的成本。
+        // 忽略即可 —— 光标在截图里对用户不是坏事。
+        let _ = with_cursor;
         let script = format!(
             "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
              $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;\
              $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;\
              $g=[System.Drawing.Graphics]::FromImage($bmp);\
              $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);\
-             $bmp.Save('{}',[System.Drawing.Imaging.ImageFormat]::Png)",
-            path.to_string_lossy().replace('\\', "\\\\")
+             $bmp.Save('{}',[System.Drawing.Imaging.ImageFormat]::{})",
+            path.to_string_lossy().replace('\\', "\\\\"),
+            image_format,
         );
         let out = std::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", &script])
@@ -577,7 +588,19 @@ fn screen_capture_full(with_cursor: bool, format: &str) -> Result<Value, String>
         if !out.status.success() || !path.exists() {
             return Err("截屏失败".into());
         }
-        Ok(serde_json::json!({ "path": path.to_string_lossy() }))
+        let bytes = std::fs::read(&path).map_err(|e| format!("读取截图失败: {e}"))?;
+        let mut result = serde_json::Map::new();
+        result.insert("path".into(), Value::String(path.to_string_lossy().to_string()));
+        result.insert("bytes".into(), serde_json::json!(bytes.len()));
+        // 和 macOS 分支保持一致：插件要在自己的画布上标记就必须拿到图像本身，
+        // 超过 8MB 就只给路径，避免超大图穿 postMessage 把界面卡住
+        if bytes.len() <= 8 * 1024 * 1024 {
+            result.insert(
+                "dataUrl".into(),
+                Value::String(format!("data:{mime};base64,{}", crate::screenshot::base64_encode(&bytes))),
+            );
+        }
+        Ok(Value::Object(result))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {

@@ -132,6 +132,10 @@ pub fn run() {
         .run(|app_handle, event| {
             // Dock 图标点击（或再次 open）：macOS 把这个事件发给**已有实例**，
             // 根本不开新进程 —— 单例插件管不到这条路，必须在这里唤起窗口。
+            //
+            // Reopen 变体只在 macOS/iOS 上存在，Windows/Linux 的 RunEvent
+            // 里没有它 —— 不加 cfg 的话 Windows 编译直接报 E0599。
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Reopen { .. } = event {
                 if let Some(win) = app_handle.get_webview_window("main") {
                     let _ = win.show();
@@ -139,6 +143,10 @@ pub fn run() {
                     let _ = win.set_focus();
                 }
             }
+            // 上面 cfg 掉之后 event 在 Windows 上没人用，显式吃掉免得告警
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+            let _ = event;
+            let _ = app_handle;
         });
 }
 
