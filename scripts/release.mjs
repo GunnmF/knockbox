@@ -23,6 +23,19 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (p) => readFileSync(join(root, p), 'utf8')
 const write = (p, s) => writeFileSync(join(root, p), s)
 
+// 仓库根 .env 里的凭据（已在 .gitignore）：跑命令时自动带上，不用每次 export
+{
+  const f = join(root, '.env')
+  if (existsSync(f)) {
+    for (const line of readFileSync(f, 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*)\s*$/)
+      if (m && !(m[1] in process.env)) {
+        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+      }
+    }
+  }
+}
+
 const argv = process.argv.slice(2)
 const noBuild = argv.includes('--no-build')
 const level = argv.find((a) => ['patch', 'minor', 'major'].includes(a)) ?? 'patch'
@@ -115,6 +128,9 @@ execFileSync('pnpm', ['tauri', 'build'], {
     PATH: `${join(homedir(), '.cargo', 'bin')}:${process.env.PATH}`,
     TAURI_SIGNING_PRIVATE_KEY:
       process.env.TAURI_SIGNING_PRIVATE_KEY ?? join(homedir(), '.tauri', 'knockbox.key'),
+    // 密钥是空密码加密的（--ci 生成时没设密码）：不传这个环境变量，
+    // tauri build 会停在 "Password:" 提示上 —— 非交互打包不能等输入
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? '',
   },
 })
 

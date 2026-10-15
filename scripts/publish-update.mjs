@@ -25,9 +25,34 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OWNER = 'GunnmF'
 const REPO = 'knockbox'
 
+// 仓库根 .env 里的凭据（已在 .gitignore）：跑命令时自动带上，不用每次 export
+function loadDotEnv() {
+  const f = join(root, '.env')
+  if (!existsSync(f)) return
+  for (const line of readFileSync(f, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*)\s*$/)
+    if (m && !(m[1] in process.env)) {
+      process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+    }
+  }
+}
+loadDotEnv()
+
 // —— 1. 升版本 + 构建（复用 release.mjs，产物会拷到桌面）——
 const level = process.argv.slice(2).find((a) => ['patch', 'minor', 'major'].includes(a)) ?? 'patch'
-execFileSync('node', [join(root, 'scripts/release.mjs'), level], { cwd: root, stdio: 'inherit' })
+// 支持 pnpm publish-update patch 0.2.8：发版失败后重跑时指定同一个版本号，
+// 不然每次失败都会白占一个号
+const explicit = process.argv.slice(2).find((a) => /^\d+\.\d+\.\d+$/.test(a))
+// --skip-build：构建已经过了、只是上传失败时，直接用现有产物继续，不重编译
+const skipBuild = process.argv.includes('--skip-build')
+if (!skipBuild) {
+  execFileSync('node', [join(root, 'scripts/release.mjs'), level, ...(explicit ? [explicit] : [])], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+} else {
+  console.log('  --skip-build：跳过构建，直接用 target 里的现有产物\n')
+}
 
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 const tag = `v${version}`
@@ -84,7 +109,7 @@ if (!token) {
   process.exit(0)
 }
 
-const api = (method, url, body, extra = {}) =>
+const api = (method, url, body, extra = []) =>
   execFileSync('curl', [
     '-sSf', '-X', method,
     '-H', `Authorization: Bearer ${token}`,

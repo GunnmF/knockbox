@@ -83,6 +83,9 @@
 - 发版：`pnpm publish-update [patch|minor|major]`（升版本 + 构建 + 组 update.json + 上 GitHub）。
   需要 `GITHUB_TOKEN`（classic PAT，勾 repo）自动上传；没设 token 会准备好文件并打印手动步骤
 - 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
+- **dmg 打包偶发失败**：`bundle_dmg.sh` 中途崩掉时会把临时镜像
+  （`target/release/bundle/macos/rw.*.dmg`）留在挂载状态，下一次构建直接挂。
+  先 `hdiutil info | grep -i knockbox` 找出残留，`diskutil eject diskN` 推掉再重跑
 - **注意**：Tauri 的 ad-hoc 签名让每个新二进制的 cdhash 都变，macOS 的屏幕录制/TCC
   授权会在**每次更新后**要求重新授权 —— 根治要 Developer ID 或稳定自签名证书
   （`APPLE_SIGNING_IDENTITY` 环境变量，`tauri-bundler` 自动识别，配置不用改代码）
