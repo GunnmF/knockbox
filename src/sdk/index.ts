@@ -78,6 +78,7 @@ const PERMISSION_MAP = {
   'storage.clear': 'storage:local',
   'system.lockScreen': 'system:lock-screen',
   'screen.capture': 'screen:capture',
+  'screen.save': 'screen:capture',
 } as const
 
 export interface Knockbox {
@@ -114,15 +115,22 @@ export interface Knockbox {
     /**
      * 截屏。
      *
-     * `mode: 'region'` 会弹出系统自带的选区界面拖框挑区域，
-     * `'full'`（默认）是整屏。返回值里 `dataUrl` 供插件在画布上做标记和
-     * 取色；超过 8MB 的图不会带 `dataUrl`，只有 `path`。
+     * `mode: 'region'` 弹出宿主的全屏覆盖层：拖框选区、标记、放大镜取色、
+     * 快捷键复制颜色，用户完成或取消后才返回 —— 也就是说这个 Promise
+     * 会挂到用户操作结束。`'full'`（默认，不传参数时）是整屏直出，不弹界面。
+     *
+     * 返回值：`copied` 表示是否进了剪贴板；保存了文件时才有 `path`/`bytes`；
+     * 超过 8MB 的图不带 `dataUrl`。用户取消时 Promise 以「已取消截图」reject。
      */
     capture(opts?: {
       mode?: 'full' | 'region'
       cursor?: boolean
       format?: 'png' | 'jpg'
-    }): Promise<{ path: string; bytes: number; dataUrl?: string }>
+    }): Promise<{ path?: string; bytes?: number; copied?: boolean; dataUrl?: string }>
+    /**
+     * 把画布上标记好的图落盘。只能写进宿主的截图目录，文件名由宿主生成。
+     */
+    save(dataUrl: string, tag?: string): Promise<{ path: string; bytes: number }>
   }
   readonly shell: {
     openUrl(url: string): Promise<void>
@@ -196,11 +204,14 @@ export async function connect(): Promise<Knockbox> {
     },
     screen: {
       capture: (opts) =>
-        send<{ path: string; bytes: number; dataUrl?: string }>('screen.capture', {
+        send<{ path?: string; bytes?: number; copied?: boolean; dataUrl?: string }>('screen.capture', {
+          // 默认仍是 full：老插件不传参数时行为不该变（region 会弹覆盖层）
           mode: opts?.mode ?? 'full',
           cursor: opts?.cursor ?? false,
           format: opts?.format ?? 'png',
         }),
+      save: (dataUrl: string, tag?: string) =>
+        send<{ path: string; bytes: number }>('screen.save', { dataUrl, tag }),
     },
     shell: {
       openUrl: (url: string) => send<void>('shell.openUrl', { url }),

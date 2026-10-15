@@ -288,4 +288,18 @@ mod tests {
         // 绝对路径同样会逃出插件目录
         assert!(resolve_inside(root, "/etc/passwd").is_none());
     }
+
+    /// 内置轻应用随源码走，没有任何安装时校验兜底 —— 清单写错一个拼写
+    /// （未知权限、重复 setting key），要等到用户唤起插件才暴露。
+    /// 这里把它变成编译期就会红的单测。
+    #[test]
+    fn 内置轻应用清单全部合法() {
+        for id in crate::plugins::builtin::BUILTIN_IDS {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("builtins")
+                .join(id);
+            let m = load(&root).unwrap_or_else(|e| panic!("内置轻应用 {id} 清单非法: {e}"));
+            assert_eq!(m.id.as_str(), *id, "目录名与清单 id 不一致");
+        }
+    }
 }

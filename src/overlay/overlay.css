@@ -1,0 +1,216 @@
+/* 截图覆盖层样式。作用域全部收在 .ovl- 前缀下，不影响启动器主界面。 */
+
+.ovl-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ovl-loading {
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 13px/1.5 -apple-system, "PingFang SC", system-ui, sans-serif;
+}
+
+.ovl-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+.ovl-hud {
+  /* 指针事件只在这一层接，底层画布纯展示 */
+  touch-action: none;
+}
+
+/* ——— 放大镜 ——— */
+
+.ovl-mag {
+  position: absolute;
+  width: 148px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(20, 20, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none; /* 不能挡鼠标的选区操作 */
+  z-index: 30;
+}
+
+.ovl-mag-canvas {
+  width: 132px;
+  height: 132px;
+  display: block;
+  border-radius: 5px;
+  margin: 0 auto;
+  image-rendering: pixelated;
+}
+
+.ovl-mag-text {
+  margin-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #fff;
+}
+
+.ovl-mag-pos {
+  opacity: 0.55;
+}
+
+.ovl-mag-hint {
+  opacity: 0.75;
+  font-family: -apple-system, "PingFang SC", system-ui, sans-serif;
+}
+
+/* ——— 文字标记输入框 ——— */
+
+.ovl-text-input {
+  position: absolute;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px dashed rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 6px;
+  min-width: 160px;
+  font-family: -apple-system, "PingFang SC", sans-serif;
+  caret-color: #fff;
+}
+
+/* ——— 底部提示条 ——— */
+
+.ovl-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(20, 20, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.85);
+  font: 12px/1.5 -apple-system, "PingFang SC", system-ui, sans-serif;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 20;
+}
+
+.ovl-demo-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 149, 0, 0.25);
+  color: #ffb340;
+}
+
+/* ——— 工具栏 ——— */
+
+.ovl-toolbar {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: rgba(24, 24, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.ovl-btn {
+  font: 12px/1 -apple-system, "PingFang SC", system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.88);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ovl-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ovl-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ovl-btn.is-on {
+  background: rgba(10, 132, 255, 0.35);
+  color: #fff;
+}
+
+.ovl-btn.ovl-primary {
+  background: #0a84ff;
+  color: #fff;
+}
+
+.ovl-btn.ovl-primary:hover:not(:disabled) {
+  background: #2a94ff;
+}
+
+.ovl-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  padding: 0;
+  cursor: pointer;
+  flex: none;
+}
+
+.ovl-color.is-on {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.ovl-sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 3px;
+  flex: none;
+}
+
+/* ——— 操作反馈 ——— */
+
+.ovl-toast {
+  position: absolute;
+  left: 50%;
+  top: 40px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(20, 20, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: 12px/1.5 -apple-system, "PingFang SC", system-ui, sans-serif;
+  z-index: 60;
+  pointer-events: none;
+  animation: ovl-toast-in 0.15s ease-out;
+}
+
+@keyframes ovl-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

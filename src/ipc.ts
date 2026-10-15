@@ -127,6 +127,30 @@ export const pluginSettingValues = (id: string) => invoke<Record<string, unknown
 export const pluginSaveSettingValues = (id: string, values: Record<string, unknown>) =>
   invoke<void>('plugin_save_setting_values', { id, values })
 
+// ——— 截图覆盖层（index.html?overlay=1 页面专用，宿主自有页面不过权限网关）———
+
+export interface ScreenshotBeginInfo {
+  /** 冻结帧（PNG data URL），尺寸是物理像素 */
+  dataUrl: string
+  /** 发起会话的插件的设置（manifest default 垫底 + 用户值） */
+  settings: Record<string, unknown>
+  /** 截图保存目录，仅用于界面提示 */
+  saveDir: string
+}
+
+export interface ScreenshotFinishResult {
+  path?: string
+  bytes?: number
+  copied: boolean
+  dataUrl?: string
+}
+
+export const screenshotBegin = () => invoke<ScreenshotBeginInfo>('screenshot_begin')
+export const screenshotFinish = (args: { saveDataUrl?: string; copyDataUrl?: string }) =>
+  invoke<ScreenshotFinishResult>('screenshot_finish', args)
+export const screenshotCancel = () => invoke<void>('screenshot_cancel')
+export const screenshotCopyColor = (text: string) => invoke<void>('screenshot_copy_color', { text })
+
 /**
  * 插件 SDK 的唯一出口。Rust 侧会先校验该插件的 manifest 里是否声明了
  * 对应权限，未声明会返回 PERMISSION_DENIED。

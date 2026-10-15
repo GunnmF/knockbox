@@ -4,67 +4,19 @@
     <meta charset="utf-8" />
     <title>截图</title>
     <style>
+      /* direct 型轻应用：正常使用时这个页面永远不显示（面板高度为 0）。
+         真出错时宿主会弹原生提示，这里只留一行兜底说明。 */
       :root { color-scheme: dark; }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        font: 12px/1.5 -apple-system, "PingFang SC", system-ui, sans-serif;
-        color: rgba(255, 255, 255, .92);
+        font: 12px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+        color: rgba(255, 255, 255, .7);
         background: transparent;
         padding: 10px 12px;
-      }
-      .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-      button {
-        font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 7px;
-        cursor: pointer; border: 1px solid rgba(255,255,255,.18);
-        background: rgba(255,255,255,.1); color: inherit;
-      }
-      button:hover:not(:disabled) { background: rgba(255,255,255,.2) }
-      button:disabled { opacity: .4; cursor: default }
-      button.on { background: rgba(74,158,255,.3); border-color: #4a9eff; }
-      .sep { width: 1px; height: 18px; background: rgba(255,255,255,.15); margin: 0 2px; }
-      .stage { position: relative; margin-top: 9px; }
-      canvas {
-        max-width: 100%; border-radius: 7px; display: block;
-        background: rgba(0,0,0,.35); cursor: crosshair;
-      }
-      .status { margin-top: 7px; font-size: 11px; opacity: .65; min-height: 16px; }
-      .swatch {
-        display: inline-flex; align-items: center; gap: 6px;
-        vertical-align: middle; margin-left: 8px;
-      }
-      .swatch i {
-        width: 12px; height: 12px; border-radius: 3px; display: inline-block;
-        border: 1px solid rgba(255,255,255,.3);
       }
     </style>
   </head>
   <body>
-    <div class="bar">
-      <button id="shot">截图</button>
-      <button id="save" disabled>保存</button>
-      <button id="open" disabled>打开</button>
-      <span class="sep"></span>
-      <button data-tool="none" class="on">选择</button>
-      <button data-tool="pen">画笔</button>
-      <button data-tool="rect">方框</button>
-      <button data-tool="arrow">箭头</button>
-      <button data-tool="text">文字</button>
-      <span class="sep"></span>
-      <label style="font-size:11px;opacity:.7">
-        粗细
-        <input id="size" type="range" min="1" max="14" value="3" style="width:56px;vertical-align:middle" />
-      </label>
-      <input id="color" type="color" value="#ff3b30" style="width:24px;height:20px;padding:0;border:0;background:none" />
-      <span class="sep"></span>
-      <button id="undo">撤销</button>
-      <button id="clear">清空标记</button>
-    </div>
-
-    <div class="stage">
-      <canvas id="cv" width="16" height="9"></canvas>
-    </div>
-
-    <div class="status" id="status">先点「截图」；选色模式下在图上点一下即可取色</div>
+    正在启动截图…（选区、标记、取色都在全屏覆盖层里进行）
     <script type="module" src="./main.js"></script>
   </body>
 </html>

@@ -43,7 +43,7 @@ fn requirement_for(method: &str) -> Requirement {
         "window.resize" => Requirement::Needs("window:resize"),
         "history.list" => Requirement::Needs("history:read"),
         "system.lockScreen" => Requirement::Needs("system:lock-screen"),
-        "screen.capture" => Requirement::Needs("screen:capture"),
+        "screen.capture" | "screen.save" => Requirement::Needs("screen:capture"),
         // 纯前端行为：宿主侧无需任何系统能力
         "settings.get" | "settings.open" | "pushResult" | "setPanel" | "close" => {
             Requirement::AlwaysAllowed
@@ -124,14 +124,23 @@ fn check_permission(manifest: &Manifest, method: &str) -> Result<(), PluginError
 }
 
 /// 校验并执行一次 SDK 调用。
-pub fn dispatch(plugin_id: &str, method: &str, params: Value) -> Result<Value, PluginError> {
+///
+/// 需要 `AppHandle` 是因为 `screen.capture` 的区域模式要建覆盖层窗口
+/// （见 `screenshot.rs`）—— 纯数据处理的方法用不到它，但签名统一比按方法
+/// 分叉简单。
+pub fn dispatch(
+    app: &tauri::AppHandle,
+    plugin_id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, PluginError> {
     // 诊断开关：把每次 SDK 调用的结果打出来。插件链路有四层
     // （模块加载 → 握手 → 权限 → 执行），没有这行就只能靠猜。
     let log = std::env::var_os("KNOCKBOX_LOG_ASSETS").is_some();
     if log {
         eprintln!("[call] {plugin_id} {method}");
     }
-    let result = dispatch_inner(plugin_id, method, params);
+    let result = dispatch_inner(app, plugin_id, method, params);
     if log {
         match &result {
             Ok(v) => eprintln!("[call]   → ok {v}"),
@@ -141,7 +150,12 @@ pub fn dispatch(plugin_id: &str, method: &str, params: Value) -> Result<Value, P
     result
 }
 
-fn dispatch_inner(plugin_id: &str, method: &str, params: Value) -> Result<Value, PluginError> {
+fn dispatch_inner(
+    app: &tauri::AppHandle,
+    plugin_id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, PluginError> {
     let installed = store::get(plugin_id).ok_or_else(|| {
         PluginError::NotFound(format!("插件 {plugin_id} 未安装"))
     })?;
@@ -217,7 +231,14 @@ fn dispatch_inner(plugin_id: &str, method: &str, params: Value) -> Result<Value,
             if !matches!(format, "png" | "jpg") {
                 return Err(PluginError::InvalidParams("format 只能是 png 或 jpg".into()));
             }
-            screen_capture(mode, with_cursor, format).map_err(PluginError::Internal)
+            if mode == "region" {
+                // Snipaste 式覆盖层：冻结帧 + 自绘选区/标记/取色。
+                // 会阻塞到用户在覆盖层里完成或取消，结果直接作为返回值。
+                crate::screenshot::run_region_session(app, plugin_id)
+                    .map_err(PluginError::Internal)
+            } else {
+                screen_capture_full(with_cursor, format).map_err(PluginError::Internal)
+            }
         }
         "screen.save" => {
             // 插件在画布上标记完，需要把成品落盘。宿主只提供"打开路径"，
@@ -300,6 +321,12 @@ fn validate_domain(url: &str, allowed: &[String]) -> Result<(), PluginError> {
 // ————————————————————————————————————————————————
 // 各能力的实际实现
 // ————————————————————————————————————————————————
+
+/// 写文本到剪贴板。截图覆盖层复制颜色也走这里（它是宿主自有页面，
+/// 不过插件权限网关，但实现只有一份）。
+pub(crate) fn clipboard_write_text(text: &str) -> Result<(), String> {
+    clipboard_write(text).map(|_| ())
+}
 
 #[cfg(target_os = "macos")]
 fn clipboard_read() -> Result<Value, String> {
@@ -473,25 +500,18 @@ fn lock_screen() -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-/// 截屏。存到桌面的「Knockbox 截图」目录。
+/// 全屏直出截图（无覆盖层交互）。存到桌面的「Knockbox 截图」目录。
 ///
-/// `mode`：
-/// - `full` —— 整屏
-/// - `region` —— 弹出系统自带的选区界面（十字光标拖框）。
-///   这里用系统的选择器而不是自绘全屏浮层：后者要新建一个透明置顶窗口、
-///   处理拖拽与多显示器，是个能单独做一周的活；系统选择器是原生交互、
-///   零维护，能力上等价。
+/// 区域截图不走这里 —— `screen.capture` 的 region 分支在
+/// `crate::screenshot::run_region_session`，冻结帧 + 自绘覆盖层。
 ///
 /// 返回 `path`（落盘文件）**和** `dataUrl`：插件要在自己的画布上做标记和
 /// 取色，就必须拿到图像本身；走 data URL 免得插件再去碰本机文件系统。
 /// 超过 8MB 就只给路径，避免超大图穿 postMessage 把界面卡住。
-fn screen_capture(mode: &str, with_cursor: bool, format: &str) -> Result<Value, String> {
+fn screen_capture_full(with_cursor: bool, format: &str) -> Result<Value, String> {
     #[cfg(target_os = "macos")]
     {
-        let dir = dirs::desktop_dir()
-            .ok_or_else(|| "找不到桌面目录".to_string())?
-            .join("Knockbox 截图");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("创建截图目录失败: {e}"))?;
+        let dir = crate::screenshot::screenshots_dir()?;
 
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -503,13 +523,6 @@ fn screen_capture(mode: &str, with_cursor: bool, format: &str) -> Result<Value, 
         cmd.arg("-x"); // 静音，不播放快门声
         if with_cursor {
             cmd.arg("-C");
-        }
-        match mode {
-            // -i = 系统自带的选区/窗口选择界面
-            "region" => {
-                cmd.arg("-i");
-            }
-            _ => {}
         }
         cmd.arg("-t").arg(format).arg(&path);
 
@@ -570,6 +583,24 @@ fn screen_capture(mode: &str, with_cursor: bool, format: &str) -> Result<Value, 
     {
         Err("当前平台不支持截屏".into())
     }
+}
+
+/// 插件标记完的成品图落盘。只能写进截图目录，文件名由宿主生成 ——
+/// 不给插件任意路径写文件的能力。
+fn screen_save(data_url: &str, tag: &str) -> Result<Value, String> {
+    let (mime, bytes) = crate::screenshot::decode_data_url(data_url)?;
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        other => return Err(format!("不支持的图片格式 {other}")),
+    };
+    let dir = crate::screenshot::screenshots_dir()?;
+    let path = dir.join(format!("截屏-{}-{tag}.{ext}", crate::screenshot::now_millis()));
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入截图失败: {e}"))?;
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "bytes": bytes.len(),
+    }))
 }
 
 fn open_app_by_name(name: &str, _plugin_id: &str) -> Result<Value, String> {    let apps = crate::core::apps::scan();

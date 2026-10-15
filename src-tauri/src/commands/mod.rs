@@ -418,13 +418,14 @@ pub fn plugin_set_pinned(args: PinArg) -> Result<(), String> {
 /// 而窗口是 alwaysOnTop 的，用户连关都关不掉。
 #[tauri::command]
 pub async fn plugin_call(
+    app: AppHandle,
     id: String,
     method: String,
     params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, PluginCallError> {
     let params = params.unwrap_or(serde_json::Value::Object(Default::default()));
     let dispatched = tauri::async_runtime::spawn_blocking(move || {
-        host::dispatch(&id, &method, params)
+        host::dispatch(&app, &id, &method, params)
     })
     .await
     .map_err(|e| PluginCallError {
@@ -516,6 +517,38 @@ pub fn plugin_save_setting_values(id: String, values: serde_json::Value) -> Resu
         .ok_or_else(|| "plugin-settings.json 结构异常".to_string())?;
     obj.insert(id, values);
     store::save_plugin_settings(&all)
+}
+
+// ————————————————————————————————————————————————
+// 截图覆盖层（宿主自有页面 screencap-overlay 调用，不过插件权限网关）
+// ————————————————————————————————————————————————
+
+/// 覆盖层页面加载后取冻结帧 + 插件设置，并显示窗口。
+#[tauri::command]
+pub fn screenshot_begin(app: AppHandle) -> Result<serde_json::Value, String> {
+    crate::screenshot::begin(&app)
+}
+
+/// 完成截图：保存文件和/或复制到剪贴板，随后结束会话。
+#[tauri::command]
+pub fn screenshot_finish(
+    app: AppHandle,
+    save_data_url: Option<String>,
+    copy_data_url: Option<String>,
+) -> Result<serde_json::Value, String> {
+    crate::screenshot::finish(&app, save_data_url, copy_data_url)
+}
+
+/// 取消截图（Esc / 右键）。
+#[tauri::command]
+pub fn screenshot_cancel(app: AppHandle) {
+    crate::screenshot::cancel_session(&app)
+}
+
+/// 截图中按快捷键复制光标处颜色。
+#[tauri::command]
+pub fn screenshot_copy_color(app: AppHandle, text: String) -> Result<(), String> {
+    crate::screenshot::copy_color(&app, &text)
 }
 
 // ————————————————————————————————————————————————

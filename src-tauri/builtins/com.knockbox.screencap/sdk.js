@@ -31,6 +31,7 @@ const PERMISSION_MAP = {
     'storage.clear': 'storage:local',
     'system.lockScreen': 'system:lock-screen',
     'screen.capture': 'screen:capture',
+    'screen.save': 'screen:capture',
 };
 /**
  * 连接宿主。返回一个 Proxy，使得**未授权的方法根本不存在**（`undefined`），
@@ -81,7 +82,14 @@ export async function connect() {
             lockScreen: () => send('system.lockScreen'),
         },
         screen: {
-            capture: () => send('screen.capture'),
+            // 参数必须透传：宿主靠 mode 决定走全屏直出还是覆盖层会话。
+            // 早前这里漏了参数，插件设置的 mode/format 全被静默忽略。
+            capture: (options) => send('screen.capture', {
+                mode: options?.mode ?? 'full',
+                cursor: options?.cursor ?? false,
+                format: options?.format ?? 'png',
+            }),
+            save: (dataUrl, tag) => send('screen.save', { dataUrl, tag }),
         },
         shell: {
             openUrl: (url) => send('shell.openUrl', { url }),

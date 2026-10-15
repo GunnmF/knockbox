@@ -10,6 +10,7 @@
 mod commands;
 mod core;
 mod plugins;
+mod screenshot;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -42,6 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppCache::default())
+        .manage(screenshot::ScreenSession::default())
         .register_uri_scheme_protocol("knockbox-plugin", |_app, request| {
             serve_plugin_asset(request.uri().path())
         })
@@ -78,6 +80,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 截图覆盖层和主窗口的生命周期完全不同，先分叉：
+            // 覆盖层被销毁（含 webview 崩溃）时必须给还在等待的插件线程
+            // 补发一次取消，否则 plugin_call 会永远挂住。
+            if window.label() == screenshot::OVERLAY_LABEL {
+                if let WindowEvent::Destroyed = event {
+                    screenshot::cancel_if_active(window.app_handle());
+                }
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // 点关闭按钮 = 收起，不是退出。真正的退出走托盘菜单。
                 api.prevent_close();
@@ -105,6 +116,10 @@ pub fn run() {
             commands::plugin_meta,
             commands::plugin_setting_values,
             commands::plugin_save_setting_values,
+            commands::screenshot_begin,
+            commands::screenshot_finish,
+            commands::screenshot_cancel,
+            commands::screenshot_copy_color,
             commands::read_selection,
             commands::app_info,
             commands::clear_history,

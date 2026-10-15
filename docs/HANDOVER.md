@@ -98,6 +98,36 @@
 实测效果：窗口从「固定 520px」改成自适应后，空闲状态 RSS 从 127MB 降到 98MB ——
 WebView 不用渲染那么大的画布，是省下来的。
 
+### 3.6 Snipaste 式截图：覆盖层是宿主能力，不是插件能力
+
+v3 的区域截图不再用 `screencapture -i` 的系统选区界面。系统界面只能给一个框，
+标记、放大镜取色、快捷键复制颜色都没有 —— 而这些正是截图工具的高频动作。
+
+流程（`src-tauri/src/screenshot.rs`）：
+
+1. 插件调 `screen.capture({mode:'region'})` → `plugin_call` 在 spawn_blocking 线程里
+   藏起主窗口 → 截一张**全屏冻结帧**到临时文件 → 建无边框置顶窗口
+   （`index.html?overlay=1`，宿主自己的 React 页面）
+2. 覆盖层页面调 `screenshot_begin` 拿冻结帧和插件设置，窗口此时才显示
+   （建窗口时先 `visible:false`，尺寸位置就位、拿到图再 show，避免闪一帧）
+3. 用户拖框/标记/取色 → `screenshot_finish`（保存/复制） 或 `screenshot_cancel`（Esc）
+4. Rust 通过 **mpsc 把结果回给还在阻塞的插件线程**，然后销毁覆盖层窗口
+
+四个必须记住的点：
+
+| 点 | 原因 |
+|---|---|
+| **reply 恰好发一次**：`PendingSession.reply` 是 `Option<Sender>`，所有出口（完成/取消/窗口被 `destroy`）都先 `take()` 会话再发送。新加出口时先看 `screenshot.rs` 顶部的注释 —— 漏发会让 `plugin_call` 永久挂住 |
+| **macOS 要手动抬 window level**：`always_on_top` 只到 `NSFloatingWindowLevel`(3)，菜单栏在 24 —— 不抬的话屏幕顶部那条永远被盖住、选不中也取不了色。`objc` 宏 `setLevel: 25`（多了个 0.2 的纯 FFI 依赖就为这个） |
+| **清理窗口用 `destroy()` 不用 `close()`**：`close()` 会触发 `CloseRequested`，被全局窗口钩子拦成 `hide` —— 覆盖层藏起来不销毁等于白占一个 webview |
+| **同一入口两种窗口**：`main.tsx` 按 `?overlay=1` 分流渲染 App / ScreenshotOverlay，不用给 Vite 加第二个 entry。覆盖层跑在宿主页面里，**不过插件权限网关** |
+
+覆盖层页面在非 Tauri 环境（浏览器直接打开）会走**演示模式**：合成一张测试图，
+保存/复制只弹提示。其余交互完全一致 —— UI 开发和回归都靠它，浏览器里就能测。
+
+坐标模型：覆盖层内部一律用**物理像素**（冻结帧原始尺寸），只有 DOM 元素定位时
+除以 `k = 帧宽 / 视口宽` 换回 CSS 像素。导出时直接从底层画布裁选区。
+
 ---
 
 ## 4. 文件清单与完成状态
@@ -125,7 +155,8 @@ WebView 不用渲染那么大的画布，是省下来的。
 | `plugins/store.rs` | ✅ | 已安装插件注册表 |
 | `plugins/source.rs` | ✅ | 四种安装来源 + zip 炸弹防护 + 路径穿越防护 + 回滚 |
 | `plugins/host.rs` | ✅ | 权限网关 + 3 个单测 |
-| `commands/mod.rs` | ✅ | 前端命令层 |
+| `screenshot.rs` | ✅ | 截图会话状态机：冻结帧、覆盖层窗口、保存/剪贴板 + 2 个单测 |
+| `commands/mod.rs` | ✅ | 前端命令层（含覆盖层用的 4 个截图命令） |
 
 **✅ Rust 代码已通过 `cargo check` + `cargo test`（10/10 单测通过）。** 详见 §6。
 
@@ -136,8 +167,9 @@ WebView 不用渲染那么大的画布，是省下来的。
 | `main.tsx` | ✅ | React 挂载 |
 | `App.tsx` | ✅ | 主界面 + 键盘导航 + 插件 iframe 桥 |
 | `hooks.ts` | ✅ | `useSearch`（40ms 防抖）、`useSelection` |
-| `ipc.ts` | ✅ | 类型化 invoke 封装 |
+| `ipc.ts` | ✅ | 类型化 invoke 封装（含 4 个截图命令） |
 | `styles.css` | ✅ | 样式 |
+| `overlay/ScreenshotOverlay.tsx` + `overlay.css` | ✅ | 截图覆盖层（`index.html?overlay=1`），浏览器里可演示模式运行 |
 | `components/Settings.tsx` | ✅ | 轻应用管理面板 |
 | `sdk/index.ts` | ✅ | 插件 SDK，**将发布为 `@knockbox/plugin-sdk`** |
 
@@ -241,6 +273,9 @@ cargo check && cargo test             # 10/10 通过
 | 8 | `plugin_call` 是同步命令，内部有 `curl --max-time 15` | 插件一卡**整个启动器 UI 冻住**，而窗口 alwaysOnTop，连关都关不掉 |
 | 9 | 没开 `assetProtocol`，CSP 也没放行 `asset:` | **所有图标显示破图**（代码里的首字母兜底永远走不到） |
 | 10 | `minKnockboxVersion` 字段解析了但全项目零引用 | 规范 §2.1/§10 的版本约定是空的 |
+| 11 | `dispatch_inner` 的 `screen.save` 分支调用的 `screen_save` 函数**根本不存在** | **整个 Rust 工程编译不过** —— 上个截图插件提交引入的，`cargo check` 直接失败 |
+| 12 | `screen.save` 只在 `dispatch_inner` 里有分支，没进 `requirement_for` 的权限映射 | 就算编译过了也永远被判 `UNKNOWN_METHOD`，插件存不了标好的图 |
+| 13 | `builtins/com.knockbox.screencap/sdk.js` 的 `screen.capture` 把整个 options 参数丢了 | 插件设置里的 mode/format/cursor 全被静默忽略，永远走默认全屏 |
 
 ### 🔴 仍未做：权限逐条确认（最大的模型空洞）
 

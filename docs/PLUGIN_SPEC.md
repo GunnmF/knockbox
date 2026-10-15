@@ -140,6 +140,11 @@ my-plugin/
 | `system:lock-screen` | 锁定屏幕 | 高 —— **不可撤销**。插件必须给用户明确的确认动作，禁止在唤起时直接调用 |
 | `screen:capture` | 截取屏幕，存到本机并返回文件路径 | 高 —— 会拍到屏幕上的密码、聊天记录 |
 
+> `screen:capture` 覆盖两个方法：`screen.capture`（`mode: 'region'` 时宿主会弹
+> 全屏覆盖层让用户框选/标记/取色，这个 Promise 会挂到用户操作结束，取消时
+> 以「已取消截图」reject）和 `screen.save`（把插件在画布上标好的图落盘，
+> 只能写进宿主的截图目录，文件名由宿主生成）。
+
 > `system:lock-screen` 和 `screen:capture` 是内置轻应用（锁屏、截图）需要的能力。
 > 两者都是高影响操作，因此独立成权限而不是并入 `shell:*` —— 用户能分别授予或拒绝。
 
@@ -234,7 +239,9 @@ const { text, app } = await kb.system.getSelection()
 
 // —— 锁屏 / 截屏（高影响，务必给用户确认动作）——
 await kb.system.lockScreen()
-const { path } = await kb.screen.capture()   // 存到本机，返回文件路径
+await kb.screen.capture()                    // 全屏直出，存到本机，立即返回
+await kb.screen.capture({ mode: 'region' })  // 弹出宿主全屏覆盖层，等用户操作完才返回
+await kb.screen.save(dataUrl, 'tag')         // 画布上标好的图落盘（只能写进截图目录）
 
 // —— 启动 (shell:*) ——
 await kb.shell.openUrl('https://example.com')
