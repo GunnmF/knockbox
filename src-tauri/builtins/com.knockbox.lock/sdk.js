@@ -31,6 +31,7 @@ const PERMISSION_MAP = {
     'storage.clear': 'storage:local',
     'system.lockScreen': 'system:lock-screen',
     'screen.capture': 'screen:capture',
+    'screen.save': 'screen:capture',
 };
 /**
  * 连接宿主。返回一个 Proxy，使得**未授权的方法根本不存在**（`undefined`），
@@ -81,7 +82,13 @@ export async function connect() {
             lockScreen: () => send('system.lockScreen'),
         },
         screen: {
-            capture: () => send('screen.capture'),
+            capture: (opts) => send('screen.capture', {
+                // 默认仍是 full：老插件不传参数时行为不该变（region 会弹覆盖层）
+                mode: opts?.mode ?? 'full',
+                cursor: opts?.cursor ?? false,
+                format: opts?.format ?? 'png',
+            }),
+            save: (dataUrl, tag) => send('screen.save', { dataUrl, tag }),
         },
         shell: {
             openUrl: (url) => send('shell.openUrl', { url }),

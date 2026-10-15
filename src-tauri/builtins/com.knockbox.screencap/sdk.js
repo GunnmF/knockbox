@@ -82,12 +82,11 @@ export async function connect() {
             lockScreen: () => send('system.lockScreen'),
         },
         screen: {
-            // 参数必须透传：宿主靠 mode 决定走全屏直出还是覆盖层会话。
-            // 早前这里漏了参数，插件设置的 mode/format 全被静默忽略。
-            capture: (options) => send('screen.capture', {
-                mode: options?.mode ?? 'full',
-                cursor: options?.cursor ?? false,
-                format: options?.format ?? 'png',
+            capture: (opts) => send('screen.capture', {
+                // 默认仍是 full：老插件不传参数时行为不该变（region 会弹覆盖层）
+                mode: opts?.mode ?? 'full',
+                cursor: opts?.cursor ?? false,
+                format: opts?.format ?? 'png',
             }),
             save: (dataUrl, tag) => send('screen.save', { dataUrl, tag }),
         },
