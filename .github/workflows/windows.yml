@@ -35,8 +35,12 @@ jobs:
 
       - name: 构建安装包（不产出 updater 签名产物 —— 私钥不出 CI）
         # createUpdaterArtifacts 默认开着，且构建时强制要求私钥；
-        # CI 里没有密钥，必须显式关掉，安装包照常产出
-        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        # CI 里没有密钥，必须显式关掉，安装包照常产出。
+        #
+        # 用配置文件而不是命令行传 JSON：Windows runner 默认 shell 是
+        # PowerShell，它会在传给 CLI 之前把 '{"a":1}' 的引号吃掉，
+        # CLI 收到的是 {a:1} 直接报 "key must be a string"
+        run: pnpm tauri build --config .github/tauri.windows.json
 
       - name: 上传安装包
         uses: actions/upload-artifact@v4
