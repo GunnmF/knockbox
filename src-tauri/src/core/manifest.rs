@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILE: &str = "plugin.json";
-pub const SPEC_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -147,10 +147,6 @@ pub fn set_pinned(id: &str, pinned: bool) -> Result<(), String> {
     save_id_list("plugins-pinned.json", &list)
 }
 
-fn disabled_path() -> PathBuf {
-    store::data_dir().join("plugins-disabled.json")
-}
-
 fn load_disabled() -> Vec<String> {
     load_id_list("plugins-disabled.json")
 }
