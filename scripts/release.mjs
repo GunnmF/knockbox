@@ -103,12 +103,19 @@ function syncSdk() {
 }
 
 // —— 3. 编译 ——
-// cargo 不在默认 PATH 里，不 export 就会报 "failed to run 'cargo metadata'"
+// cargo 不在默认 PATH 里，不 export 就会报 "failed to run 'cargo metadata'"。
+// 自更新签名：tauri build 只认 TAURI_SIGNING_PRIVATE_KEY（可以是私钥路径），
+// 不会去 ~/.tauri 自动找 —— 不显式指给它就会报 "no private key"。
 syncSdk()
 execFileSync('pnpm', ['tauri', 'build'], {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, PATH: `${join(homedir(), '.cargo', 'bin')}:${process.env.PATH}` },
+  env: {
+    ...process.env,
+    PATH: `${join(homedir(), '.cargo', 'bin')}:${process.env.PATH}`,
+    TAURI_SIGNING_PRIVATE_KEY:
+      process.env.TAURI_SIGNING_PRIVATE_KEY ?? join(homedir(), '.tauri', 'knockbox.key'),
+  },
 })
 
 // —— 3. 把产物端到桌面，省得每次去 target/release/bundle 里翻 ——

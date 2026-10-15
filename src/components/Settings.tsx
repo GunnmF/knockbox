@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
+  appInfo,
+  checkForUpdate,
   getSettings,
-  saveSettings,
+  installUpdate,
   pluginInstallDir,
   pluginInstallGit,
   pluginInstallZip,
@@ -13,10 +15,14 @@ import {
   pluginMeta,
   pluginSaveSettingValues,
   pluginSettingValues,
+  relaunchApp,
   rescanApps,
+  saveSettings,
+  type DownloadProgress,
   type GlobalSettings,
   type InstalledPlugin,
   type SettingDef,
+  type Update,
 } from '../ipc'
 
 /** 权限的中文说明，安装确认时逐条展示给用户。 */
@@ -201,6 +207,50 @@ export default function Settings({ onClose }: { onClose: () => void }) {
     values: Record<string, unknown>
   } | null>(null)
 
+  // ——— 自更新 ———
+  const [version, setVersion] = useState('')
+  const [update, setUpdate] = useState<Update | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState('')
+  const [progress, setProgress] = useState<DownloadProgress | null>(null)
+  const [installed, setInstalled] = useState(false)
+
+  const onCheckUpdate = async () => {
+    setUpdateBusy(true)
+    setUpdateStatus('')
+    setUpdate(null)
+    setInstalled(false)
+    setProgress(null)
+    try {
+      const found = await checkForUpdate()
+      if (!found) {
+        setUpdateStatus(`已是最新版本（v${version}）`)
+      } else {
+        setUpdate(found)
+      }
+    } catch (e) {
+      // 常见原因：还没发布过 release、网络不通、endpoint 没配
+      setUpdateStatus(`检查失败：${String(e)}`)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const onInstall = async () => {
+    if (!update) return
+    setUpdateBusy(true)
+    setUpdateStatus('下载中…')
+    try {
+      await installUpdate(update, setProgress)
+      setInstalled(true)
+      setUpdateStatus('安装完成，重启后生效')
+    } catch (e) {
+      setUpdateStatus(`安装失败：${String(e)}`)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
   const refresh = () => void pluginList().then(setPlugins)
   useEffect(() => {
     refresh()
@@ -212,6 +262,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         setSettings(DEFAULT_SETTINGS)
         setMessage({ kind: 'err', text: `读取设置失败：${String(e)}` })
       })
+    void appInfo()
+      .then((i) => setVersion(i.version))
+      .catch(() => {})
   }, [])
 
   /** 改一项设置并立刻落盘。快捷键会在 Rust 侧热切换，不需要重启。 */
@@ -431,6 +484,41 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               <p className="kb-hint-text">网页搜索模板里用 {'{query}'} 代表输入内容。</p>
             </>
           )}
+        </section>
+        )}
+
+        {tab === 'prefs' && (
+        <section className="kb-section">
+          <h3>更新</h3>
+          <div className="kb-row">
+            <span className="kb-field-label">当前版本 v{version || '…'}</span>
+            <button disabled={updateBusy} onClick={() => void onCheckUpdate()}>
+              {updateBusy ? '处理中…' : '检查更新'}
+            </button>
+            {update && !installed && (
+              <button disabled={updateBusy} onClick={() => void onInstall()}>
+                下载并安装 v{update.version}
+              </button>
+            )}
+            {installed && (
+              <button onClick={() => void relaunchApp().catch(() => {})}>立即重启</button>
+            )}
+          </div>
+          {progress && !installed && (
+            <div className="kb-row">
+              <progress
+                className="kb-update-progress"
+                value={progress.downloaded}
+                max={progress.total ?? 100}
+              />
+              <span className="kb-field-hint">
+                {progress.total
+                  ? `${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`
+                  : `${(progress.downloaded / 1048576).toFixed(1)} MB`}
+              </span>
+            </div>
+          )}
+          {updateStatus && <p className="kb-hint-text">{updateStatus}</p>}
         </section>
         )}
 

@@ -23,3 +23,6 @@ yarn-error.log*
 
 # macOS
 .DS_Store
+
+# 自更新发布产物（pnpm publish-update 的 staging 目录）
+/release-out

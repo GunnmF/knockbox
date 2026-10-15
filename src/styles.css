@@ -581,6 +581,12 @@ input {
   cursor: pointer;
 }
 
+.kb-update-progress {
+  width: 220px;
+  height: 6px;
+  accent-color: #4a9eff;
+}
+
 .kb-perms {
   display: flex;
   flex-wrap: wrap;

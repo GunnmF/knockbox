@@ -73,6 +73,20 @@
 - 搜索防抖 40ms（`src/hooks.ts`）—— 低于它会有粘滞感
 - Release profile：`lto = true`、`opt-level = "s"`、`panic = "abort"`、`strip = true`
 
+### 3.7 自更新（tauri-plugin-updater）
+
+- 端点：`https://github.com/GunnmF/knockbox/releases/latest/download/update.json`
+  （GitHub Releases 的 latest 固定指向最新 release，`pnpm publish-update` 每次发版都替换它）
+- **签名密钥对**：私钥在 `~/.tauri/knockbox.key`（**不在仓库里，丢了所有用户无法再更新，要备份**）；
+  公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。重新生成用
+  `npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
+- 发版：`pnpm publish-update [patch|minor|major]`（升版本 + 构建 + 组 update.json + 上 GitHub）。
+  需要 `GITHUB_TOKEN`（classic PAT，勾 repo）自动上传；没设 token 会准备好文件并打印手动步骤
+- 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
+- **注意**：Tauri 的 ad-hoc 签名让每个新二进制的 cdhash 都变，macOS 的屏幕录制/TCC
+  授权会在**每次更新后**要求重新授权 —— 根治要 Developer ID 或稳定自签名证书
+  （`APPLE_SIGNING_IDENTITY` 环境变量，`tauri-bundler` 自动识别，配置不用改代码）
+
 ### 3.5 单例、快捷键、窗口高度
 
 这三个是启动器的基本功，但都有容易做错的地方，记在这里免得重新踩：

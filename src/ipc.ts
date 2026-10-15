@@ -6,6 +6,10 @@
  * - 插件 SDK 也复用这里的 `pluginCall`，保证权限校验只有一条路径
  */
 import { invoke } from '@tauri-apps/api/core'
+import { check, type Update } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
+
+export type { Update }
 
 export type Target =
   | { t: 'app'; v: string }
@@ -103,6 +107,41 @@ export const rescanApps = () => invoke<number>('rescan_apps')
 export const getSettings = () => invoke<GlobalSettings>('get_settings')
 export const saveSettings = (settings: GlobalSettings) => invoke<void>('save_settings', { settings })
 export const readSelection = () => invoke<{ text: string; app: string }>('read_selection')
+export const appInfo = () =>
+  invoke<{ version: string; dataDir: string; pluginCount: number }>('app_info')
+
+// ——— 自更新（tauri-plugin-updater，端点和公钥在 tauri.conf.json）———
+
+/** 检查更新。端点不可达时把原始错误抛给调用方，让 UI 自己决定怎么提示。 */
+export const checkForUpdate = (): Promise<Update | null> => check()
+
+export interface DownloadProgress {
+  downloaded: number
+  total: number | null
+  done: boolean
+}
+
+/** 下载并安装更新，进度通过回调上报。完成后需要 relaunchApp() 生效。 */
+export async function installUpdate(
+  update: Update,
+  onProgress: (p: DownloadProgress) => void,
+): Promise<void> {
+  let downloaded = 0
+  let total: number | null = null
+  await update.downloadAndInstall((ev) => {
+    if (ev.event === 'Started') {
+      total = ev.data.contentLength ?? null
+      onProgress({ downloaded: 0, total, done: false })
+    } else if (ev.event === 'Progress') {
+      downloaded += ev.data.chunkLength
+      onProgress({ downloaded, total, done: false })
+    } else if (ev.event === 'Finished') {
+      onProgress({ downloaded, total, done: true })
+    }
+  })
+}
+
+export const relaunchApp = (): Promise<void> => relaunch()
 
 /**
  * 让窗口高度跟着内容走。传入「内容比当前视口多/少了多少像素」，
