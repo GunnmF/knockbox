@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>打个招呼</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        font: 13px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+        padding: 12px 14px;
+      }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      button {
+        font: inherit; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+        border: 1px solid rgba(128,128,128,.4); background: rgba(128,128,128,.12);
+      }
+      button:disabled { opacity: .4; cursor: not-allowed; }
+      pre {
+        margin: 10px 0 0; padding: 8px; border-radius: 6px; max-height: 120px;
+        overflow: auto; white-space: pre-wrap; word-break: break-all;
+        background: rgba(128,128,128,.1); font-size: 12px;
+      }
+      .muted { opacity: .6; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <button id="copy">复制当前输入</button>
+      <button id="paste">读剪贴板</button>
+      <button id="selection">读前台选中文本</button>
+      <button id="save">存到插件私有存储</button>
+      <button id="load">读取存储</button>
+    </div>
+    <pre id="out" class="muted">等待操作…</pre>
+
+    <!-- 原生 ESM + 相对路径 import，不需要任何构建步骤（规范 §9）。
+         sdk.js 是从 src/sdk/index.ts 编译过来的产物，见 examples/README.md。 -->
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

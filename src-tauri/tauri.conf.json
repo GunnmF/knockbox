@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Knockbox",
+  "version": "0.1.16",
+  "identifier": "com.knockbox.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5183",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost knockbox-plugin: http://knockbox-plugin.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src knockbox-plugin: http://knockbox-plugin.localhost; script-src 'self'; object-src 'none'; base-uri 'none'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "/Applications/**",
+          "/System/Applications/**",
+          "$HOME/Applications/**",
+          "$HOME/Desktop/**",
+          "$APPDATA/Knockbox/**"
+        ]
+      }
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Knockbox",
+        "width": 760,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "shadow": false,
+        "url": "index.html"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "叩一叩，万物即出",
+    "longDescription": "Knockbox 是一个轻量的跨平台启动器：输入即可匹配应用、搜索文件、网页搜索，或运行你安装的轻应用。",
+    "resources": [
+      "builtins/**/*"
+    ]
+  }
+}

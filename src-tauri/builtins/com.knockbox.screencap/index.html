@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>截图</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 14px;
+        font: 12px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+        color: rgba(255, 255, 255, .92);
+        background: transparent;
+      }
+      pre { margin: 0; white-space: pre-wrap; word-break: break-all }
+      .muted { opacity: .6 }
+    </style>
+  </head>
+  <body>
+    <!-- 唤起即执行并直接打开看图工具，正常情况下这行一闪而过；
+         失败时它就是用户唯一能看到的原因 -->
+    <pre class="muted" id="out">截屏中…</pre>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

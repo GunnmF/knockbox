@@ -1,0 +1,609 @@
+/* Knockbox 主界面样式
+ *
+ * 目标：窗口本身几乎透明（macOS 上配合 vibrancy 观感），
+ * 所有视觉重量集中在一个圆角面板上，唤起时不抢焦点、不过度干扰。
+ */
+
+:root {
+  --bg: rgba(28, 28, 32, 0.92);
+  --bg-elevated: rgba(44, 44, 50, 0.9);
+  --text: rgba(255, 255, 255, 0.92);
+  --text-dim: rgba(255, 255, 255, 0.45);
+  --border: rgba(255, 255, 255, 0.09);
+  --accent: #4a9eff;
+  --danger: #ff5f57;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: transparent;
+  /* 标题栏区域整体可拖动，交互元素各自取消 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+ * 透明底色兜底。
+ *
+ * 窗口是 transparent 的，但 WebView 自己的默认底色在部分环境下并不透明，
+ * 不显式声明就会出现"该透出桌面的地方是黑块"。
+ */
+#root {
+  background: transparent;
+  -webkit-background-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  overflow: hidden;
+}
+
+kbd,
+input {
+  font-family: inherit;
+}
+
+/* ————————————————————————— 窗口外壳 ————————————————————————— */
+
+.kb-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /*
+   * 这里**故意没有** box-shadow。
+   *
+   * 面板顶满窗口（#root 不留内边距），任何向外扩散的阴影都会被窗口裁掉，
+   * 只剩贴着边缘的一条细线 —— 看起来又像黑框回来了。
+   * 而真正的黑边来源是 macOS 的原生窗口阴影：它是按**窗口矩形**画的，
+   * 面板是 12px 圆角的，四角被内容"挖空"后阴影从透明处透出来，成了四个
+   * 深色方块。已在 tauri.conf.json 里关掉（"shadow": false）。
+   *
+   * 代价：面板没有投影，在浅色壁纸上会略微"贴"在桌面上。
+   * 想要投影就必须让面板内缩、留出绘制空间 —— 两者不可兼得。
+   */
+  overflow: hidden;
+  /* 顶部条可拖动窗口 */
+  cursor: default;
+}
+
+.kb-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.kb-icon {
+  color: var(--text-dim);
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.kb-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 17px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.kb-input::placeholder {
+  color: var(--text-dim);
+}
+
+.kb-clear {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kb-clear:hover {
+  color: var(--text);
+}
+
+/* ————————————————————————— 结果列表 ————————————————————————— */
+
+.kb-results {
+  flex: 1;
+  overflow-y: auto;
+  /* padding 必须放在 .kb-results-inner 上，不能放这里：
+     高度自适应量的是 inner 的 offsetHeight，padding 在内层才会被量进去。
+     放这里的话，算出来的窗口高度刚好少一个 padding，内容永远溢出出滚动条。 */
+  padding: 0;
+  min-height: 0;
+}
+
+.kb-group + .kb-group {
+  margin-top: 4px;
+}
+
+.kb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.kb-item.is-active {
+  background: rgba(74, 158, 255, 0.16);
+}
+
+.kb-badge {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  flex-shrink: 0;
+  min-width: 38px;
+  text-align: center;
+}
+
+.kb-badge-plugin {
+  background: rgba(74, 158, 255, 0.22);
+  color: var(--accent);
+}
+
+.kb-badge-web {
+  background: rgba(52, 199, 89, 0.18);
+  color: #34c759;
+}
+
+.kb-item-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.kb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+}
+
+.kb-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-item-title {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-item-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-hint {
+  color: var(--text-dim);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* ————————————————— 空查询的钉住快捷网格 ————————————————— */
+
+/* auto-fill：钉多少铺多少，一行放不下自动换行；整个网格比列表矮，
+   窗口高度跟着内容贴过去，就不会有滚动条 */
+.kb-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+
+.kb-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.kb-tile.is-active {
+  background: rgba(74, 158, 255, 0.16);
+}
+
+.kb-tile .kb-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.kb-tile-name {
+  font-size: 11px;
+  color: var(--text);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.kb-empty,
+.kb-hint-text {
+  padding: 20px 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+.kb-error {
+  padding: 8px 16px;
+  color: var(--danger);
+  font-size: 12px;
+  background: rgba(255, 95, 87, 0.1);
+  flex-shrink: 0;
+}
+
+/* ————————————————————————— 插件面板 ————————————————————————— */
+
+.kb-panel {
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kb-panel-title {
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.kb-panel-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: transparent;
+}
+
+/* ————————————————————————— 底栏 ————————————————————————— */
+
+.kb-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.kb-footer-right {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.kb-footer-right:hover {
+  color: var(--accent);
+}
+
+/* ————————————————————————— 设置 ————————————————————————— */
+
+.kb-settings-title {
+  flex: 1;
+  font-size: 15px;
+}
+
+.kb-settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 16px;
+  min-height: 0;
+}
+
+/* 设置内容的自然高度载体 —— App.tsx 量的就是它，别给它加固定高度 */
+.kb-settings-inner {
+  display: block;
+}
+
+.kb-section {
+  padding: 14px 0;
+}
+
+.kb-section + .kb-section {
+  border-top: 1px solid var(--border);
+}
+
+.kb-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+
+.kb-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.kb-row button,
+.kb-plugin-actions button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.kb-row button:hover:not(:disabled),
+.kb-plugin-actions button:hover {
+  background: rgba(74, 158, 255, 0.2);
+}
+
+.kb-row button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.kb-danger:hover {
+  background: rgba(255, 95, 87, 0.2) !important;
+  color: var(--danger);
+}
+
+/* 设置项：标签固定宽度，控件对齐成一列 */
+.kb-field-label {
+  width: 84px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  align-self: center;
+}
+
+.kb-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.kb-check input {
+  accent-color: var(--accent);
+}
+
+/* 快捷键录制中：明显的状态反馈，否则用户不知道按键被吃掉了 */
+.kb-recording {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  background: rgba(74, 158, 255, 0.18) !important;
+}
+
+.kb-field-error {
+  font-size: 11px;
+  color: var(--danger);
+  align-self: center;
+}
+
+/* 结果列表：内容少时不用撑高，多了由 Rust 侧夹住窗口高度后内部滚动 */
+.kb-results {
+  overscroll-behavior: contain;
+}
+
+/* 内容自然高度的载体 —— App.tsx 量的就是它，别给它加固定高度 */
+.kb-results-inner {
+  display: block;
+  /* 原 .kb-results 的 padding 挪到内层，见上 */
+  padding: 6px;
+}
+
+.kb-git-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.kb-git-input:focus {
+  border-color: var(--accent);
+}
+
+.kb-plugin-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.kb-plugin-row + .kb-plugin-row {
+  border-top: 1px solid var(--border);
+}
+
+.kb-plugin-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-plugin-name {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-plugin-version,
+.kb-plugin-id {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.kb-plugin-id {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.kb-tag-off {
+  font-size: 10px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.kb-tag-on {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+/* ————————————— 设置页的「应用 / 设置」分栏 ————————————— */
+
+.kb-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.kb-tab {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.kb-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.kb-tab:hover:not(.is-active) {
+  color: var(--text);
+}
+
+/* 快捷键录制按钮下方的说明文字 */
+.kb-field-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  align-self: center;
+  line-height: 1.4;
+}
+
+/* 单个轻应用的设置区（由 manifest 的 settings 声明自动生成） */
+.kb-plugin-settings {
+  padding: 10px 16px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(74, 158, 255, 0.06);
+  flex-shrink: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.kb-plugin-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.kb-plugin-settings-head button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.kb-plugin-settings textarea.kb-git-input {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.kb-plugin-settings select.kb-git-input {
+  cursor: pointer;
+}
+
+.kb-perms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.kb-perm {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.kb-plugin-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}

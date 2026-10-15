@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Knockbox 主窗口能力集。刻意保持最小：主窗口只需要它自己的 core 权限，所有系统能力（打开应用、读写剪贴板、系统通知、进程操作）都通过 Rust 层的白名单 SDK 暴露，不走 Tauri 的通用 command 通道，避免被 XSS 的页面直接调用。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-center",
+    "core:event:default",
+    "dialog:allow-open"
+  ]
+}

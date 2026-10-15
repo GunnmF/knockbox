@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- 黑边框成因的最小复现：左=修复前，右=修复后。
+     灰色区域代表"窗口"，overflow:hidden 模拟窗口对越界内容的裁剪。 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        margin: 0;
+        padding: 30px;
+        background: #6b7280; /* 模拟桌面壁纸，好让边缘问题一眼可见 */
+        font: 13px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+        color: #fff;
+      }
+      .row { display: flex; gap: 34px; }
+      figure { margin: 0; }
+      figcaption { padding: 10px 2px; font-size: 12px; opacity: .9; }
+
+      /* 窗口：边界之外一律裁掉，等价于 transparent 窗口对 WebView 的裁剪 */
+      .win {
+        width: 330px;
+        height: 230px;
+        overflow: hidden;
+        background: transparent;
+        outline: 1px dashed rgba(255, 255, 255, .5); /* 标出窗口边界 */
+        position: relative;
+      }
+
+      /* 修复前：面板 100% 撑满窗口，阴影直接顶到窗口边缘 */
+      .panel-full {
+        height: 100%;
+        background: rgba(28, 28, 32, .94);
+        border: 1px solid rgba(255, 255, 255, .09);
+        border-radius: 12px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, .45);
+        display: flex; align-items: center; justify-content: center;
+      }
+      /* 修复后：窗口留出 10px 内边距，阴影有地方画 */
+      .win-inset { padding: 10px; }
+      .panel-inset {
+        height: 100%;
+        background: rgba(28, 28, 32, .94);
+        border: 1px solid rgba(255, 255, 255, .09);
+        border-radius: 12px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, .45);
+        display: flex; align-items: center; justify-content: center;
+      }
+      b { font-size: 15px; }
+      p { margin: 6px 0 0; opacity: .75; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <figure>
+        <div class="win">
+          <div class="panel-full"><b>修复前</b></div>
+        </div>
+        <figcaption>面板顶满窗口 → 阴影被裁成硬边</figcaption>
+      </figure>
+
+      <figure>
+        <div class="win win-inset">
+          <div class="panel-inset"><b>修复后</b></div>
+        </div>
+        <figcaption>留 10px 内边距 → 阴影正常扩散</figcaption>
+      </figure>
+    </div>
+  </body>
+</html>

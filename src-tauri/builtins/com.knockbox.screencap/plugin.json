@@ -1,0 +1,11 @@
+{
+  "id": "com.knockbox.screencap",
+  "name": "截图",
+  "version": "1.0.0",
+  "description": "截取整屏并保存到桌面",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "author": "knockbox",
+  "keywords": ["截图", "截屏", "screenshot", "capture"],
+  "permissions": ["screen:capture", "shell:open-path"]
+}

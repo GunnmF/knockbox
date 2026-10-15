@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>锁屏</title>
+    <style>
+      body {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font: 13px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+        color: rgba(255, 255, 255, .92);
+        background: transparent;
+      }
+      .msg { font-size: 13px }
+      .muted { opacity: .6 }
+    </style>
+  </head>
+  <body>
+    <!-- 唤起即执行，正常情况下这行文字一闪而过就关窗了；
+         留着是为了失败时能看见原因，而不是对着空窗口干瞪眼 -->
+    <div class="msg muted" id="msg">正在锁屏…</div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

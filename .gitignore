@@ -1,0 +1,25 @@
+/tmp
+/out-tsc
+
+/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/.pnp
+.pnp.js
+
+.vscode/*
+
+# 前端构建产物
+/dist
+
+# Rust 构建产物（几个 GB，不能进版本库）
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# tauri icon 顺手生成的移动端图标 —— Knockbox 是桌面启动器，用不上
+/src-tauri/icons/android
+/src-tauri/icons/ios
+
+# macOS
+.DS_Store

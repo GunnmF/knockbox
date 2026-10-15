@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DoNotAskProjectManager">
+    <option name="idToDisplayName">
+      <map>
+        <entry key="Dependencies from package.json" value="来自 package.json 的依赖项可用" />
+      </map>
+    </option>
+  </component>
+</project>

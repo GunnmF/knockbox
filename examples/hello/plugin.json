@@ -1,0 +1,11 @@
+{
+  "id": "com.example.hello",
+  "name": "打个招呼",
+  "version": "1.0.0",
+  "description": "演示轻应用链路：关键词唤起、输入联动、剪贴板读写",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "author": "knockbox",
+  "keywords": ["hi", "hello", "你好", "打招呼"],
+  "permissions": ["clipboard:read", "clipboard:write", "system:selection"]
+}

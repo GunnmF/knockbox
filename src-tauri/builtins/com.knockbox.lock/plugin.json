@@ -1,0 +1,11 @@
+{
+  "id": "com.knockbox.lock",
+  "name": "锁屏",
+  "version": "1.0.0",
+  "description": "立即锁定屏幕",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "author": "knockbox",
+  "keywords": ["锁屏", "lock", "锁"],
+  "permissions": ["system:lock-screen"]
+}

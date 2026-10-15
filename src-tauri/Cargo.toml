@@ -1,0 +1,38 @@
+[package]
+name = "knockbox"
+version = "0.1.16"
+description = "叩叩 — 轻量跨平台启动器"
+authors = ["knockbox"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "knockbox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.3", features = ["tray-icon", "image-png", "protocol-asset"] }
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2.7.1"
+tauri-plugin-dialog = "2.8.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "7"
+walkdir = "2"
+sha2 = "0.10"
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
