@@ -47,10 +47,13 @@ pnpm dev              # 只跑前端（vite，5183 端口）
 打包与发布：
 
 ```bash
-pnpm release                  # 升补丁号并打包，产物拷到桌面
+pnpm release                  # 升补丁号并打包，产物拷到桌面（用于本机自测）
 pnpm release minor            # 升次版本
-pnpm publish-update           # 打包 + 签名 + 上传 GitHub Releases（自更新用）
+git tag v0.2.x && git push --tags   # 推 tag → CI 编 mac/Windows 包、签名、上传 Release
 ```
+
+发布由 GitHub Actions 完成（mac + Windows 双平台、更新包带签名校验）。
+本地手工兜底：`pnpm publish-update`（本机构建+签名+上传）或 `pnpm sign-release`（只签名）。
 
 凭据和签名密钥的说明见 [docs/HANDOVER.md](docs/HANDOVER.md)。
 

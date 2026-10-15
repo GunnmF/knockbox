@@ -124,7 +124,15 @@ if (existsSync(windowsDir)) {
     extraAssets.push(msi)
   }
 } else {
-  console.log('  release-in/windows/ 里没有安装器，本次只发 macOS 更新')
+  console.log(`
+  没找到 Windows 安装器，本次只发 macOS 更新。
+  要一起发 Windows 版：
+    1. 跑一次 Actions 的 build-windows 工作流
+       https://github.com/${OWNER}/${REPO}/actions/workflows/windows.yml
+    2. 下载 artifact windows-installer，把里面的 .exe/.msi 放到
+       ${windowsDir}
+    3. 再跑一次 pnpm publish-update
+`)
 }
 
 // —— 4. 组 update.json（updater 客户端只读这个）——

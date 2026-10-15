@@ -12,7 +12,8 @@
     "release": "node scripts/release.mjs",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major",
-    "publish-update": "node scripts/publish-update.mjs"
+    "publish-update": "node scripts/publish-update.mjs",
+    "sign-release": "node scripts/sign-release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.3",

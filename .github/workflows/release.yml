@@ -1,0 +1,135 @@
+name: release
+
+# 打 tag 即发版：mac + Windows 都在 CI 里编译并**签名**，自动上传到 Release。
+#
+# 为什么签名也放 CI：为了让发版只有「推 tag」一步。私钥存在 GitHub Actions
+# Secret 里（KNOCKBOX_UPDATER_KEY），值加密存储、界面上不显示。
+# 代价与配套：secret 会在运行时注入环境变量，所以本 workflow 的第三方 action
+# **全部锁到 commit SHA**（不用 @v4 这种可被重新指向的 tag），权限压到最小
+# （只要 contents:write）。改动本 workflow 等同于交出私钥，review 时留意。
+#
+# 一次性准备（见 docs/HANDOVER.md §3.7）：
+#   Settings → Secrets and variables → Actions → New repository secret
+#   KNOCKBOX_UPDATER_KEY = ~/.tauri/knockbox.key 的**文件内容**
+#   （终端里 pbcopy < ~/.tauri/knockbox.key 直接复制）
+#
+# 流程：
+#   pnpm release            # 升版本 + 本机自测构建
+#   git commit -am v0.2.x && git tag v0.2.x && git push --tags
+#   → 本 workflow 编包 + 签名 + 上传 + 生成 update.json，全自动
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # 创建 Release / 上传附件，除此之外一律不给
+
+env:
+  # Secret 不存在时为空字符串，正好对应"私钥无密码"
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.KNOCKBOX_UPDATER_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.KNOCKBOX_UPDATER_KEY_PASSWORD }}
+
+jobs:
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@v4 # v4
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: 校验 tag 与版本号一致（手动触发时跳过）
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            echo "tag=$TAG version=$VER"
+            if [ "$TAG" != "$VER" ]; then echo "::error::tag 与 package.json 版本不一致"; exit 1; fi
+          else
+            echo "手动触发：用 package.json 的版本 v$VER"
+          fi
+
+      - name: 构建（updater 产物由 tauri 用私钥直接签好）
+        run: pnpm tauri build
+
+      - id: publish
+        name: 上传到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # tag 一律取自 package.json 的版本号：手动触发时 GITHUB_REF_NAME
+          # 是分支名（master），拿它当 tag 会建出一个叫 master 的 release
+          VER=$(node -p "require('./package.json').version")
+          TAG="v$VER"
+          D=src-tauri/target/release/bundle/macos
+          TARBALL=$(cd "$D" && ls *.app.tar.gz)
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" "$D/$TARBALL" "$D/$TARBALL.sig" "$D"/*.dmg --clobber
+          {
+            echo "asset=$TARBALL"
+            echo "signature=$(cat "$D/$TARBALL.sig")"
+            echo "version=$VER"
+          } >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@v4 # v4
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: 构建
+        run: pnpm tauri build
+
+      - id: publish
+        name: 上传到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "v" + (Get-Content package.json | ConvertFrom-Json).version
+          $root = "src-tauri/target/release/bundle"
+          # NSIS 的 exe.zip 是 updater 实际用的产物（msi.zip 备用）
+          $zip = (Get-ChildItem "$root/nsis/*.zip" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1)
+          $sigPath = "$($zip.FullName).sig"
+          gh release view $tag *> $null; if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --generate-notes }
+          gh release upload $tag "$root/nsis/*.exe" "$root/msi/*.msi" "$root/nsis/*.zip" "$root/nsis/*.zip.sig" "$root/msi/*.zip" "$root/msi/*.zip.sig" --clobber
+          "asset=$($zip.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signature=$((Get-Content $sigPath -Raw).Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+  publish-update-json:
+    name: 生成 update.json
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: 组装并上传 update.json（客户端只认这一个文件）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.macos.outputs.version }}
+          MAC_ASSET: ${{ needs.macos.outputs.publish.asset }}
+          MAC_SIG: ${{ needs.macos.outputs.publish.signature }}
+          WIN_ASSET: ${{ needs.windows.outputs.publish.asset }}
+          WIN_SIG: ${{ needs.windows.outputs.publish.signature }}
+        run: node scripts/ci-publish-update-json.mjs

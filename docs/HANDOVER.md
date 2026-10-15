@@ -73,26 +73,26 @@
 - 搜索防抖 40ms（`src/hooks.ts`）—— 低于它会有粘滞感
 - Release profile：`lto = true`、`opt-level = "s"`、`panic = "abort"`、`strip = true`
 
-### 3.7 自更新（tauri-plugin-updater）
+### 3.7 自更新（tauri-plugin-updater）+ 发版流水线
 
 - 端点：`https://github.com/GunnmF/knockbox/releases/latest/download/update.json`
-  （GitHub Releases 的 latest 固定指向最新 release，`pnpm publish-update` 每次发版都替换它）
-- **签名密钥对**：私钥在 `~/.tauri/knockbox.key`（**不在仓库里，丢了所有用户无法再更新，要备份**）；
-  公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。重新生成用
-  `npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
-- 发版：`pnpm publish-update [patch|minor|major]`（升版本 + 构建 + 组 update.json + 上 GitHub）。
-  需要 `GITHUB_TOKEN`（classic PAT，勾 repo）自动上传；没设 token 会准备好文件并打印手动步骤。
-  token 也可以放仓库根的 `.env`（已 gitignore），脚本自动加载，不用每次 export。
-  `--skip-build` 可以跳过构建只传产物（发版中途失败重跑时省两分钟）
-- **Windows 安装包走 CI**（Tauri 不做跨平台打包，`.msi`/`.exe` 只能在 Windows 上编）：
-  1. GitHub Actions 的 `build-windows`（`.github/workflows/windows.yml`）在 windows-latest
-     上编译，用 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` **关掉 updater 产物**
-     —— 构建带 updater 产物时强制要求私钥，CI 里没有密钥会直接失败
-  2. 下载 Actions artifact 里的 `.exe`/`.msi`，放进 `release-in/windows/`
-  3. `pnpm publish-update`：脚本把 exe 压成 zip、用本地私钥签名、写进 update.json 的
-     `windows-x86_64` 条目并上传 —— **私钥不出本机**是刻意设计
-  - Windows 更新产物必须是 **zip**（装着 nsis 安装器），不是裸 exe
-  - update.json 的平台键是 `OS-ARCH` 格式：Windows 是 `windows-x86_64`（**没有** `-msvc` 后缀）
+  （GitHub Releases 的 latest 固定指向最新 release，每次发版由 CI 替换它）
+- **签名密钥对**：私钥在 `~/.tauri/knockbox.key`（本地留一份），
+  同时以 Secret `KNOCKBOX_UPDATER_KEY` 存在 GitHub Actions 里（**丢了所有用户无法再更新**）；
+  公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。本地改完记得同步：
+  `pbcopy < ~/.tauri/knockbox.key` 粘到 Settings → Secrets and variables → Actions。
+  重新生成：`npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
+- **发版只有两步**（`.github/workflows/release.yml`，mac + Windows 都在 CI 里编包并签名）：
+  1. `pnpm release` → 升版本 + 本机自测构建，然后 `git commit -am v0.2.x && git tag v0.2.x && git push --tags`
+  2. 等 Actions 跑完：编包 → 用 Secret 里的私钥签名 → 上传产物 → 生成 update.json，全自动
+- **Actions artifact ≠ Release**：artifact 要登录、90 天过期、updater 读不到；
+  客户端要的是 Release 上那个匿名可下的 `update.json`。所以工作流直接传 Release，
+  Actions artifact 只在需要人工看的时候用
+- 安全姿态：私钥进了 CI，所以**所有第三方 action 锁 commit SHA**（不用 `@v4` 这种可被
+  重新指向的 tag），workflow 权限只给 `contents:write`。改动 release.yml 等同于交出私钥
+- 手工兜底（CI 挂了 / 想从这台 Mac 直接发）：
+  - `pnpm publish-update` —— 本机构建 + 本机签名 + 上传（Windows 包需要先放进 `release-in/windows/`）
+  - `pnpm sign-release` —— 只对 Release 上已有的产物签名并生成 update.json
 - 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
 - **dmg 打包偶发失败**：`bundle_dmg.sh` 中途崩掉时会把临时镜像
   （`target/release/bundle/macos/rw.*.dmg`）留在挂载状态，下一次构建直接挂。
