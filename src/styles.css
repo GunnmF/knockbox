@@ -587,6 +587,13 @@ input {
   accent-color: #4a9eff;
 }
 
+/* 搜索引擎下拉：比通用输入框窄，别抢模板输入框的位置 */
+.kb-engine-select {
+  max-width: 140px;
+  flex: none;
+  cursor: pointer;
+}
+
 .kb-perms {
   display: flex;
   flex-wrap: wrap;

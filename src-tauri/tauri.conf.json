@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Knockbox",
-  "version": "0.2.8",
+  "version": "0.2.10",
   "identifier": "com.knockbox.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -48,7 +48,8 @@
       "endpoints": [
         "https://github.com/GunnmF/knockbox/releases/latest/download/update.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZFQjVCQzMwNzUzN0Y3QTAKUldTZzl6ZDFNTHkxYmhDSGVHZldKakg5OWVIdE5ma1VaTWZlMXdvVE9idlZhT1crUllmRkdMN2UK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZFQjVCQzMwNzUzN0Y3QTAKUldTZzl6ZDFNTHkxYmhDSGVHZldKakg5OWVIdE5ma1VaTWZlMXdvVE9idlZhT1crUllmRkdMN2UK",
+      "requireSignedVersion": true
     }
   },
   "bundle": {

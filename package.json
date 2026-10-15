@@ -1,7 +1,7 @@
 {
   "name": "knockbox",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.10",
   "type": "module",
   "description": "叩叩 — 轻量跨平台启动器",
   "scripts": {

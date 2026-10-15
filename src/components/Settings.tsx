@@ -53,6 +53,21 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   registryUrl: '',
 }
 
+/**
+ * 预设搜索引擎。存储的永远只是模板串（`{query}` 占位），
+ * 这个映射只负责"选引擎 → 填模板"和"模板命中 → 回显选中项"：
+ * 模板和任何一项相等就显示那个引擎，不等就是「自定义」。
+ */
+const SEARCH_ENGINES: { name: string; template: string }[] = [
+  { name: 'Google', template: 'https://www.google.com/search?q={query}' },
+  { name: '百度', template: 'https://www.baidu.com/s?wd={query}' },
+  { name: 'Bing', template: 'https://www.bing.com/search?q={query}' },
+  { name: 'DuckDuckGo', template: 'https://duckduckgo.com/?q={query}' },
+  { name: 'GitHub', template: 'https://github.com/search?q={query}' },
+  { name: '哔哩哔哩', template: 'https://search.bilibili.com/all?keyword={query}' },
+  { name: '知乎', template: 'https://www.zhihu.com/search?type=content&q={query}' },
+]
+
 /** 一些不能从 `e.code` 直接截出来的键名。 */
 const NAMED_KEYS: Record<string, string> = {
   Space: 'Space',
@@ -208,6 +223,11 @@ export default function Settings({ onClose }: { onClose: () => void }) {
   } | null>(null)
 
   // ——— 自更新 ———
+  // 用户显式选了「自定义」搜索引擎：模板不变、输入框解锁。
+  // 不能纯靠"模板不匹配预设"推导 —— 那会导致选自定义时什么都不发生，
+  // 下拉框直接弹回当前预设
+  const [engineCustom, setEngineCustom] = useState(false)
+
   const [version, setVersion] = useState('')
   const [update, setUpdate] = useState<Update | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
@@ -453,12 +473,50 @@ export default function Settings({ onClose }: { onClose: () => void }) {
 
               <div className="kb-row">
                 <span className="kb-field-label">网页搜索</span>
+                <select
+                  className="kb-git-input kb-engine-select"
+                  disabled={!settings.webSearchEnabled}
+                  value={
+                    engineCustom
+                      ? 'custom'
+                      : (SEARCH_ENGINES.find((e) => e.template === settings.webSearchTemplate)
+                          ?.name ?? 'custom')
+                  }
+                  onChange={(e) => {
+                    if (e.target.value === 'custom') {
+                      setEngineCustom(true)
+                      return
+                    }
+                    const hit = SEARCH_ENGINES.find((en) => en.name === e.target.value)
+                    if (hit) {
+                      setEngineCustom(false)
+                      void patch({ webSearchTemplate: hit.template })
+                    }
+                  }}
+                >
+                  {SEARCH_ENGINES.map((e) => (
+                    <option key={e.name} value={e.name}>
+                      {e.name}
+                    </option>
+                  ))}
+                  <option value="custom">自定义</option>
+                </select>
                 <input
                   className="kb-git-input"
                   placeholder="https://www.google.com/search?q={query}"
                   value={settings.webSearchEnabled ? settings.webSearchTemplate : ''}
-                  disabled={!settings.webSearchEnabled}
-                  onChange={(e) => void patch({ webSearchTemplate: e.target.value })}
+                  disabled={
+                    !settings.webSearchEnabled ||
+                    (!engineCustom &&
+                      SEARCH_ENGINES.some((e) => e.template === settings.webSearchTemplate))
+                  }
+                  onChange={(e) => {
+                    // 手敲的模板如果恰好等于某个预设，把选中态还回去
+                    if (SEARCH_ENGINES.some((en) => en.template === e.target.value)) {
+                      setEngineCustom(false)
+                    }
+                    void patch({ webSearchTemplate: e.target.value })
+                  }}
                 />
                 <label className="kb-check">
                   <input
