@@ -7,11 +7,13 @@
  * 这里把它们绑成一个动作，顺带把产物拷到桌面并打印绝对路径。
  *
  * 用法：
- *   pnpm release              # 升补丁号  0.1.0 -> 0.1.1
+ *   pnpm release              # 升补丁号 + 本机编译，产物拷到桌面（自己先试用）
  *   pnpm release minor        # 升次版本  0.1.1 -> 0.2.0
  *   pnpm release major        # 升主版本  0.2.0 -> 1.0.0
- *   pnpm release patch 0.3.0  # 直接指定
+ *   pnpm release patch 0.3.0  # 直接指定版本号
  *   pnpm release --no-build   # 只升版本号，不编译
+ *   pnpm release:publish      # **日常发版就这一条**：升版本 → 提交 → 打 tag →
+ *                             #   推送，剩下交给 CI（编译/签名/上传/update.json）
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, copyFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
@@ -38,6 +40,7 @@ const write = (p, s) => writeFileSync(join(root, p), s)
 
 const argv = process.argv.slice(2)
 const noBuild = argv.includes('--no-build')
+const publish = argv.includes('--publish')
 const level = argv.find((a) => ['patch', 'minor', 'major'].includes(a)) ?? 'patch'
 const explicit = argv.find((a) => /^\d+\.\d+\.\d+$/.test(a))
 
@@ -59,6 +62,21 @@ function nextVersion() {
 
 const version = nextVersion()
 
+// 发版模式的前置检查必须**在改文件之前**做：否则拒绝退出时版本号已经被改了，
+// 留下一堆没提交的改动，比直接失败更难收拾
+if (publish) {
+  const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim()
+  if (dirty) {
+    console.error('✗ 工作区不干净，先提交或 stash：\n')
+    console.error(dirty.split('\n').map((l) => `    ${l}`).join('\n'))
+    process.exit(1)
+  }
+  if (execFileSync('git', ['tag', '-l', `v${version}`], { cwd: root, encoding: 'utf8' }).trim()) {
+    console.error(`✗ tag v${version} 已经存在，说明这个版本发过了`)
+    process.exit(1)
+  }
+}
+
 // —— 1. 同步三个文件的版本号 ——
 write('package.json', read('package.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
 
@@ -72,6 +90,32 @@ write('src-tauri/Cargo.toml', before + after)
 write('src-tauri/tauri.conf.json', read('src-tauri/tauri.conf.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
 
 console.log(`\n  版本号  ${current}  →  ${version}   (package.json / Cargo.toml / tauri.conf.json)\n`)
+
+const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
+
+// —— 发版：一条命令走完，剩下的交给 CI ——
+// 为什么不再本机编译：mac + Windows 两端都在 CI 编（见 .github/workflows/release.yml），
+// 本机构建只是多花几分钟给一个跟线上产物不一样的包。tag 一推，CI 接手编译、签名、
+// 上传和生成 update.json。
+if (publish) {
+  const tag = `v${version}`
+  // SDK 要跟着这次提交走：轻应用目录里的 sdk.js 是提交物
+  syncSdk()
+
+  git(['add', '-A'])
+  execFileSync('git', ['commit', '-m', `release: v${version}`], { cwd: root, stdio: 'inherit' })
+  execFileSync('git', ['tag', '-a', tag, '-m', `v${version}`], { cwd: root, stdio: 'inherit' })
+
+  console.log(`\n  推送 master 和 ${tag} …`)
+  execFileSync('git', ['push'], { cwd: root, stdio: 'inherit' })
+  execFileSync('git', ['push', '--tags'], { cwd: root, stdio: 'inherit' })
+
+  console.log(`\n  ✓ v${version} 已推送\n`)
+  console.log('    Actions 会在 mac + Windows 上编译、签名、上传，并生成 update.json：')
+  console.log('    https://github.com/GunnmF/knockbox/actions\n')
+  console.log('    想先在本机试用再发，跑不带 --publish 的 pnpm release。\n')
+  process.exit(0)
+}
 
 if (noBuild) {
   console.log('  --no-build：只升了版本号，没有编译。\n')
