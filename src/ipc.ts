@@ -150,6 +150,8 @@ export const screenshotFinish = (args: { saveDataUrl?: string; copyDataUrl?: str
   invoke<ScreenshotFinishResult>('screenshot_finish', args)
 export const screenshotCancel = () => invoke<void>('screenshot_cancel')
 export const screenshotCopyColor = (text: string) => invoke<void>('screenshot_copy_color', { text })
+/** 覆盖层前端打点到宿主 stderr（排查真机焦点/IME 问题用） */
+export const overlayLog = (msg: string) => invoke<void>('overlay_log', { msg }).catch(() => {})
 
 /**
  * 插件 SDK 的唯一出口。Rust 侧会先校验该插件的 manifest 里是否声明了

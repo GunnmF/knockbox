@@ -551,6 +551,12 @@ pub fn screenshot_copy_color(app: AppHandle, text: String) -> Result<(), String>
     crate::screenshot::copy_color(&app, &text)
 }
 
+/// 覆盖层页面前端打点。排查真机问题（焦点、IME）时让页面状态进到 stderr 日志。
+#[tauri::command]
+pub fn overlay_log(msg: String) {
+    eprintln!("[ovl] {msg}");
+}
+
 // ————————————————————————————————————————————————
 // 杂项
 // ————————————————————————————————————————————————

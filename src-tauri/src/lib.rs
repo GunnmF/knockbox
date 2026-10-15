@@ -120,6 +120,7 @@ pub fn run() {
             commands::screenshot_finish,
             commands::screenshot_cancel,
             commands::screenshot_copy_color,
+            commands::overlay_log,
             commands::read_selection,
             commands::app_info,
             commands::clear_history,

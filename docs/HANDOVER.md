@@ -118,12 +118,20 @@ v3 的区域截图不再用 `screencapture -i` 的系统选区界面。系统界
 | 点 | 原因 |
 |---|---|
 | **reply 恰好发一次**：`PendingSession.reply` 是 `Option<Sender>`，所有出口（完成/取消/窗口被 `destroy`）都先 `take()` 会话再发送。新加出口时先看 `screenshot.rs` 顶部的注释 —— 漏发会让 `plugin_call` 永久挂住 |
-| **macOS 要手动抬 window level**：`always_on_top` 只到 `NSFloatingWindowLevel`(3)，菜单栏在 24 —— 不抬的话屏幕顶部那条永远被盖住、选不中也取不了色。`objc` 宏 `setLevel: 25`（多了个 0.2 的纯 FFI 依赖就为这个） |
+| **macOS 要手动抬 window level**：`always_on_top` 只到 `NSFloatingWindowLevel`(3)，菜单栏在 24 —— 不抬的话屏幕顶部那条永远被盖住、选不中也取不了色。`objc` 宏 `setLevel: 25`（多了个 0.2 的纯 FFI 依赖就为这个）**且必须 `run_on_main_thread`** —— AppKit 窗口操作只许在主线程，后台线程裸 `msg_send` 会被 WindowManagement 框架 SIGTRAP；release 是 `panic = "abort"`，崩的时候连日志都没有，只能去 `~/Library/Logs/DiagnosticReports/` 翻 .ips 崩溃报告 |
+| **窗口尺寸/位置一律给逻辑值**：macOS 跨屏移动窗口时保持**逻辑**尺寸不变只重算物理像素。给物理值时窗口诞生在哪块屏（取决于用户当时的焦点屏）就按哪块的 scale 换算 —— 生在 1x 外接屏再移回 Retina 主屏，逻辑尺寸直接翻倍，冻结帧放大到屏幕外框选不到。`Monitor::size/position ÷ scale_factor` 就是该屏精确的逻辑几何 |
+| **多显示器跟光标走**：光标在哪块屏就 `screencapture -D <序号>` 截哪块、覆盖层开哪块。序号 = `available_monitors()` 里命中光标位置的下标 + 1（与 CG 显示列表顺序一致）；`-D` 未产出时退回主屏。Windows 的 PowerShell 捕获只支持主屏，覆盖层也只开主屏 |
 | **清理窗口用 `destroy()` 不用 `close()`**：`close()` 会触发 `CloseRequested`，被全局窗口钩子拦成 `hide` —— 覆盖层藏起来不销毁等于白占一个 webview |
 | **同一入口两种窗口**：`main.tsx` 按 `?overlay=1` 分流渲染 App / ScreenshotOverlay，不用给 Vite 加第二个 entry。覆盖层跑在宿主页面里，**不过插件权限网关** |
 
 覆盖层页面在非 Tauri 环境（浏览器直接打开）会走**演示模式**：合成一张测试图，
 保存/复制只弹提示。其余交互完全一致 —— UI 开发和回归都靠它，浏览器里就能测。
+
+排查"点了截图没反应"用三个开关：`KNOCKBOX_LOG_ASSETS=1`（全链路日志，含
+`[shot]` 会话轨迹）、`KNOCKBOX_AUTOLAUNCH=com.knockbox.screencap`（免按键唤起）、
+`KNOCKBOX_FAKE_FRAME=1`（跳过 screencapture 用图标当冻结帧，隔离屏幕录制权限这个
+干扰项）。另有 begin 看门狗：页面 30 秒没起来就结束会话并弹原生提示，插件线程
+不会永久挂住。
 
 坐标模型：覆盖层内部一律用**物理像素**（冻结帧原始尺寸），只有 DOM 元素定位时
 除以 `k = 帧宽 / 视口宽` 换回 CSS 像素。导出时直接从底层画布裁选区。
@@ -276,6 +284,10 @@ cargo check && cargo test             # 10/10 通过
 | 11 | `dispatch_inner` 的 `screen.save` 分支调用的 `screen_save` 函数**根本不存在** | **整个 Rust 工程编译不过** —— 上个截图插件提交引入的，`cargo check` 直接失败 |
 | 12 | `screen.save` 只在 `dispatch_inner` 里有分支，没进 `requirement_for` 的权限映射 | 就算编译过了也永远被判 `UNKNOWN_METHOD`，插件存不了标好的图 |
 | 13 | `builtins/com.knockbox.screencap/sdk.js` 的 `screen.capture` 把整个 options 参数丢了 | 插件设置里的 mode/format/cursor 全被静默忽略，永远走默认全屏 |
+| 14 | 覆盖层的 `setLevel` 在 spawn_blocking 线程里裸调 `msg_send` | AppKit 窗口操作只许主线程 —— v0.2.0 **一截图就崩**（SIGTRAP，`panic=abort` 下零日志）；改 `run_on_main_thread` 投递 |
+| 15 | 覆盖层窗口 `set_size(PhysicalSize)` | 窗口生在 1x 外接屏时逻辑尺寸翻倍 —— v0.2.1 冻结帧**放大到屏幕外**，右下框选不到；改 builder 里给 `LogicalSize(size/scale)` |
+| 16 | 截图写死 `primary_monitor` | 多显示器用户在副屏唤起，截的却是主屏；改为光标所在屏 + `screencapture -D n` |
+| 17 | 文字输入框在画布 `pointerdown` 里创建，没 `preventDefault` | mousedown 默认行为在 React 处理器**之后**把焦点抢回画布，输入框当场失焦 → 空值提交销毁 → 文字工具"点了没反应"。**合成事件测不出来，只有真机 trusted 事件才复现** —— 浏览器测试要单独注意这一点 |
 
 ### 🔴 仍未做：权限逐条确认（最大的模型空洞）
 

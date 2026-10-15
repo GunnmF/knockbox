@@ -45,7 +45,7 @@
     },
     {
       "key": "copyColorKey",
-      "label": "复制颜色快捷键（截图中按下，复制光标处颜色）",
+      "label": "复制颜色快捷键（截图中按下：复制光标处颜色并退出截图）",
       "type": "select",
       "options": ["C", "X", "B"],
       "default": "C"

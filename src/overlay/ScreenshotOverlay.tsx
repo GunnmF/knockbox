@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  overlayLog,
   screenshotBegin,
   screenshotCancel,
   screenshotCopyColor,
@@ -197,6 +198,7 @@ export default function ScreenshotOverlay() {
     screenshotBegin()
       .then((info) => {
         setSettings(info.settings ?? {})
+        void overlayLog(`begin 完成 hasFocus=${document.hasFocus()}`)
         return new Promise<HTMLImageElement>((resolve, reject) => {
           const image = new Image()
           image.onload = () => resolve(image)
@@ -374,6 +376,11 @@ export default function ScreenshotOverlay() {
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button === 2) return // 右键取消走 onContextMenu
     if (busy) return
+    // 必须阻止原生默认行为：mousedown 默认会把焦点从刚创建的文字输入框
+    // 抢回画布（我们的处理器在默认行为之前跑），输入框当场失焦 →
+    // onBlur 空值提交 → 文字工具"点了没反应"。真机 trusted 事件才有
+    // 这个问题，合成事件测试测不出来。
+    e.preventDefault()
     const p = toPhys(e)
     // 指针捕获让拖出画布也能继续收 move；合成事件没有活跃指针会抛，
     // 那种情况下拖拽逻辑本身仍然成立，不该因此中断
@@ -488,6 +495,44 @@ export default function ScreenshotOverlay() {
 
   // ———————————————————————————— 文字标记 ————————————————————————————
 
+  // 文字输入框的焦点探针：真机上"文字不行"的头号嫌疑就是焦点进不了窗口，
+  // 这里把开关输入框时的焦点状态全部打点到宿主日志
+  useEffect(() => {
+    if (!textEdit) return
+    void overlayLog('textEdit 打开')
+    // autoFocus 之外再补一次：输入框是在 pointerdown 里挂载的，
+    // 万一那时窗口还没成为 key 窗，focus() 会失败（探针里见过
+    // is_focused=false），挂载后再抢一次更稳
+    const refocus = setTimeout(() => {
+      const el = document.querySelector('.ovl-text-input') as HTMLInputElement | null
+      if (el && document.activeElement !== el) el.focus()
+    }, 0)
+    const t = setTimeout(() => {
+      const el = document.activeElement
+      void overlayLog(
+        `textEdit 100ms 后 activeElement=${el?.tagName}.${el?.className} hasFocus=${document.hasFocus()}`,
+      )
+    }, 100)
+    return () => {
+      clearTimeout(refocus)
+      clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textEdit?.at])
+
+  // probe=text：免点击自测。真实点击没法在无头环境模拟，直接程序化
+  // 建选区 + 开文字框，把焦点问题复现成一条日志
+  useEffect(() => {
+    if (!img || textEdit || sel) return
+    if (new URLSearchParams(window.location.search).get('probe') !== 'text') return
+    const cx = W / 2
+    const cy = H / 2
+    setSel({ x: W / 4, y: H / 4, w: cx, h: cy })
+    setTool('text')
+    setTextEdit({ at: { x: cx, y: cy }, value: '' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img])
+
   const commitText = () => {
     if (!textEdit) return
     const t = textEdit.value.trim()
@@ -506,7 +551,7 @@ export default function ScreenshotOverlay() {
   }, [])
 
   const copyColorAtCursor = useCallback(async () => {
-    if (!cursor) return
+    if (!cursor || busy) return
     const rgb = colorAt(cursor)
     if (!rgb) return
     const text = formatColor(rgb[0], rgb[1], rgb[2], colorFormat)
@@ -514,13 +559,18 @@ export default function ScreenshotOverlay() {
       say(`演示模式：${text}（在应用内会复制到剪贴板）`)
       return
     }
+    setBusy(true)
     try {
       await screenshotCopyColor(text)
+      // 按 C 的语义就是"我只要这个颜色"：复制完直接结束截图会话，
+      // 不落盘、不进图片剪贴板（和 Snipaste 一致）。先闪一下提示再关。
       say(`已复制 ${text}`)
+      setTimeout(() => void screenshotFinish({}).catch(() => {}), 400)
     } catch (e) {
       say(`复制失败：${String(e)}`)
+      setBusy(false)
     }
-  }, [cursor, colorAt, colorFormat, demo, say])
+  }, [cursor, colorAt, colorFormat, demo, say, busy])
 
   // ———————————————————————————— 完成 / 取消 ————————————————————————————
 
@@ -652,7 +702,7 @@ export default function ScreenshotOverlay() {
             <span className="ovl-mag-pos">
               {Math.round(cursor!.x)}, {Math.round(cursor!.y)}
             </span>
-            <span className="ovl-mag-hint">{copyKey} 复制颜色</span>
+            <span className="ovl-mag-hint">{copyKey} 复制颜色并退出</span>
           </div>
         </div>
       )}
@@ -670,8 +720,14 @@ export default function ScreenshotOverlay() {
           autoFocus
           value={textEdit.value}
           placeholder="输入文字，Enter 确定"
+          onFocus={() => void overlayLog('input onFocus')}
           onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
-          onBlur={commitText}
+          onBlur={() => {
+            void overlayLog('input onBlur')
+            // 还没输内容就失焦的话不销毁编辑框 —— 留着让用户继续点。
+            // （有内容才提交，防止误触丢失已输入的文字）
+            if (textEdit.value.trim()) commitText()
+          }}
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key === 'Enter') commitText()
@@ -683,7 +739,7 @@ export default function ScreenshotOverlay() {
       {/* 没选区时的底部提示 */}
       {!selCss && !textEdit && (
         <div className="ovl-hint">
-          拖拽框选 · ⌘A 全屏 · {copyKey} 复制光标处颜色（{colorFormat}） · Esc 取消
+          拖拽框选 · ⌘A 全屏 · {copyKey} 复制光标处颜色（{colorFormat}）并退出 · Esc 取消
           {demo && <span className="ovl-demo-tag">演示模式</span>}
         </div>
       )}
