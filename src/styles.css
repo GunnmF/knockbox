@@ -548,15 +548,9 @@ input {
   line-height: 1.4;
 }
 
-/* 单个轻应用的设置区（由 manifest 的 settings 声明自动生成） */
-.kb-plugin-settings {
-  padding: 10px 16px 14px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(74, 158, 255, 0.06);
-  flex-shrink: 0;
-  max-height: 45vh;
-  overflow-y: auto;
-}
+/* 单个轻应用的设置区：现在是内容区里的一个独立视图（替换应用列表），
+   跟其它 section 一样跟着 kb-settings-inner 滚动，
+   下面两条规则只管它内部的 textarea/select。 */
 
 .kb-plugin-settings-head {
   display: flex;

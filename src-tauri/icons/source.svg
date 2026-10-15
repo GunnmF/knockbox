@@ -1,13 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4F7BFF"/>
-      <stop offset="1" stop-color="#7A4DFF"/>
+      <stop offset="0" stop-color="#3B5BFF"/>
+      <stop offset="1" stop-color="#8A3BFF"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
-  <g fill="none" stroke="#FFFFFF" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M392 372 L632 512 L392 652 Z"/>
-    <path d="M700 356 L700 668"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 叩一叩：两道涟漪，外圈更细更淡、内圈更实。小尺寸下三道会糊成噪点 -->
+    <path d="M404 456 A290 290 0 0 0 114 456" stroke-width="56" opacity=".42"/>
+    <path d="M404 456 A190 190 0 0 0 214 456" stroke-width="64"/>
+    <!-- 盒子 -->
+    <rect x="404" y="456" width="424" height="384" rx="88" stroke-width="76"/>
+    <!-- 万物即出：盒子里待取出的东西 -->
+    <path d="M538 648 L694 648" stroke-width="66"/>
+    <path d="M616 570 L616 726" stroke-width="66"/>
   </g>
 </svg>

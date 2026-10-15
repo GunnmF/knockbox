@@ -295,23 +295,37 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       <div className="kb-tabs">
         <button
           className={`kb-tab${tab === 'apps' ? ' is-active' : ''}`}
-          onClick={() => setTab('apps')}
+          onClick={() => {
+            setSettingFor(null)
+            setTab('apps')
+          }}
         >
           应用
         </button>
         <button
           className={`kb-tab${tab === 'prefs' ? ' is-active' : ''}`}
-          onClick={() => setTab('prefs')}
+          onClick={() => {
+            setSettingFor(null)
+            setTab('prefs')
+          }}
         >
           设置
         </button>
       </div>
 
-      {settingFor && (
-        <div className="kb-plugin-settings">
+      <div className="kb-settings-body">
+        {/* 内层容器：外层是 flex:1 + overflow:auto，永远等于视口高度，
+            只有量它的高度才量得出「设置内容到底需要多高」。 */}
+        <div className="kb-settings-inner">
+        {/*
+          某个轻应用的设置**替换**整个内容区，而不是浮在管理应用上面一块：
+          浮层既被下面的列表挤着，又不在滚动容器里，项一多就溢出窗口。
+        */}
+        {settingFor ? (
+        <section className="kb-section kb-plugin-settings">
           <div className="kb-plugin-settings-head">
             <span>{settingFor.name} · 设置</span>
-            <button onClick={() => setSettingFor(null)}>完成</button>
+            <button onClick={() => setSettingFor(null)}>返回</button>
           </div>
           {settingFor.defs.map((def) => {
             const value = settingFor.values[def.key]
@@ -368,13 +382,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               保存
             </button>
           </div>
-        </div>
-      )}
-
-      <div className="kb-settings-body">
-        {/* 内层容器：外层是 flex:1 + overflow:auto，永远等于视口高度，
-            只有量它的高度才量得出「设置内容到底需要多高」。 */}
-        <div className="kb-settings-inner">
+        </section>
+        ) : (
+        <>
         {tab === 'prefs' && (
         <section className="kb-section">
           <h3>快捷键与搜索</h3>
@@ -555,8 +565,11 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         </section>
         </>
         )}
+        </>
+        )}
         </div>
       </div>
+
     </div>
   )
 }

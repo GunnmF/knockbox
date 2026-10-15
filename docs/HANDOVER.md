@@ -178,7 +178,7 @@ v3 的区域截图不再用 `screencapture -i` 的系统选区界面。系统界
 | `ipc.ts` | ✅ | 类型化 invoke 封装（含 4 个截图命令） |
 | `styles.css` | ✅ | 样式 |
 | `overlay/ScreenshotOverlay.tsx` + `overlay.css` | ✅ | 截图覆盖层（`index.html?overlay=1`），浏览器里可演示模式运行 |
-| `components/Settings.tsx` | ✅ | 轻应用管理面板 |
+| `components/Settings.tsx` | ✅ | 轻应用管理面板（点某个轻应用的「设置」是**替换内容区**的独立视图，不是浮在列表上方的浮层 —— 浮层既被列表挤着又不在滚动容器里，项一多就溢出窗口；切「应用/设置」标签或点「返回」即退出） |
 | `sdk/index.ts` | ✅ | 插件 SDK，**将发布为 `@knockbox/plugin-sdk`** |
 
 **✅ 前端已通过 `tsc --noEmit`，并已在浏览器里逐项验证过交互（快捷键录制、窗口高度自适应）。**

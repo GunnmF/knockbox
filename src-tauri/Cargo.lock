@@ -1966,7 +1966,7 @@ dependencies = [
 
 [[package]]
 name = "knockbox"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "dirs",
  "objc",
