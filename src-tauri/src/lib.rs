@@ -57,6 +57,21 @@ pub fn run() {
             build_tray(app.handle())?;
             warm_cache(app.handle());
 
+            // 诊断开关：KNOCKBOX_AUTOLAUNCH=<pluginId> 时启动即唤起该轻应用。
+            // 用它可以在没有 GUI 的情况下端到端验证插件链路（无头环境下
+            // 点不了界面，而插件是否加载只能这样观测）。
+            //
+            // 必须延迟发：setup() 跑的时候前端页面还没加载完，
+            // 监听器尚未注册，立刻 emit 会被无声丢掉。
+            if let Some(id) = std::env::var("KNOCKBOX_AUTOLAUNCH").ok().filter(|s| !s.is_empty())
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    let _ = handle.emit("kb://autolaunch", id);
+                });
+            }
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -223,6 +238,16 @@ fn serve_plugin_asset(uri_path: &str) -> tauri::http::Response<Vec<u8>> {
             .status(status)
             .header(header::CONTENT_TYPE, mime)
             .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            // 必须发 CORS 头。插件页面跑在 `sandbox` 不含 allow-same-origin 的
+            // iframe 里，origin 是 `null`；而 ES module 一律按 CORS 模式请求，
+            // 没有这个头，`<script type="module">` 会被浏览器直接拦掉 ——
+            // 表现为"点了插件毫无反应"，因为插件的 JS 压根没跑起来。
+            //
+            // 用 `*` 而不是精确 origin：插件页永远处于 opaque origin，没有可
+            // 填的固定 origin。暴露面是插件自身的静态文件（不是用户数据），
+            // 且宿主 CSP 已限定只有主窗口能加载这个协议。
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
             .body(body)
             .expect("常量构造的 HTTP 响应必然合法")
     };
@@ -249,7 +274,16 @@ fn serve_plugin_asset(uri_path: &str) -> tauri::http::Response<Vec<u8>> {
     let root = plugins::store::plugin_dir(plugin_id);
     let file = root.join(rest);
     if !file.is_file() {
+        // 诊断开关：KNOCKBOX_LOG_ASSETS=1 时把每次请求打出来，
+        // 用来确认"插件到底有没有被加载"。
+        if std::env::var_os("KNOCKBOX_LOG_ASSETS").is_some() {
+            eprintln!("[assets] 404 {plugin_id}/{rest}");
+        }
         return not_found();
+    }
+
+    if std::env::var_os("KNOCKBOX_LOG_ASSETS").is_some() {
+        eprintln!("[assets] 200 {plugin_id}/{rest}");
     }
 
     let Ok(bytes) = std::fs::read(&file) else {
@@ -270,11 +304,8 @@ fn serve_plugin_asset(uri_path: &str) -> tauri::http::Response<Vec<u8>> {
         _ => "application/octet-stream",
     };
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, mime)
-        // 插件页面由 sandbox iframe 加载，禁止被当成文档直接导航
-        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .body(bytes)
-        .expect("常量构造的 HTTP 响应必然合法")
+    // 必须走上面那个 build 闭包 —— 它带 CORS 头。
+    // 之前这里自己建 Response，把 CORS 头整个绕过去了：文件确实返回了 200，
+    // 但浏览器按 CORS 规则把 module 丢弃，于是插件的 import 链在第一环就断了。
+    build(StatusCode::OK, mime, bytes)
 }

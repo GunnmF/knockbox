@@ -159,17 +159,29 @@ export default function App() {
   const launchPlugin = useCallback(async (id: string) => {
     setError(null)
     try {
-      const url = await pluginEntryUrl(id)
-      await pluginMeta(id)
+      const [url, meta] = await Promise.all([pluginEntryUrl(id), pluginMeta(id)])
       // 新会话换新 token，旧的立即失效
       tokenRef.current = crypto.randomUUID()
       setActivePlugin({ id, url })
+      // direct 应用从 0 高度起步：静默执行，用户看不到界面。
+      // 插件要反馈时自己调 setPanel 把面板撑起来。
       setPanelHeight(0)
       setPanelTitle('')
+      if (meta.invocation === 'direct') {
+        void hideWindow() // 静默执行，窗口也一并收起来
+      }
     } catch (e) {
       setError(`轻应用 ${id} 加载失败：${String(e)}`)
     }
   }, [])
+
+  // 诊断用：KNOCKBOX_AUTOLAUNCH=<id> 启动即唤起该轻应用
+  useEffect(() => {
+    const unlisten = listen<string>('kb://autolaunch', (e) => void launchPlugin(e.payload))
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [launchPlugin])
 
   const run = useCallback(
     async (item: ResultItem) => {
@@ -454,7 +466,7 @@ export default function App() {
       </div>
 
       {activePlugin && (
-        <div className="kb-panel" style={{ height: panelHeight || 200 }}>
+        <div className="kb-panel" style={{ height: panelHeight }}>
           {panelTitle && <div className="kb-panel-title">{panelTitle}</div>}
           <iframe
             key={activePlugin.id}
@@ -466,6 +478,10 @@ export default function App() {
             sandbox="allow-scripts allow-forms"
             src={activePlugin.url}
             title={activePlugin.id}
+            // 直接执行的应用（锁屏/截图）面板高度为 0，iframe 仍然是活的：
+            // 插件要靠它执行，只是没有界面给用户看。失败时插件调用
+            // setPanel 把高度撑起来，错误信息才看得见。
+            style={{ visibility: panelHeight > 0 ? 'visible' : 'hidden' }}
           />
         </div>
       )}

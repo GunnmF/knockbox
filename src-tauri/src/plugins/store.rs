@@ -18,8 +18,13 @@ pub struct InstalledPlugin {
     pub author: Option<String>,
     pub keywords: Vec<String>,
     pub activation: Activation,
+    /// `direct` 的应用被唤起后静默执行，不弹界面
+    pub invocation: crate::core::manifest::Invocation,
     pub permissions: Vec<String>,
     pub enabled: bool,
+    /// 是否声明了 settings。管理页据此决定要不要显示「设置」按钮 ——
+    /// 没声明的应用摆一个点开只会提示"没有设置项"的按钮是纯噪音。
+    pub has_settings: bool,
     /// 是否"钉"在启动器里。**只有钉住的轻应用才会出现在搜索结果中** ——
     /// 装了一堆不等于都要出现在外面，管理页里自己挑。
     pub pinned: bool,
@@ -80,9 +85,11 @@ pub fn list() -> Vec<InstalledPlugin> {
             author: m.author,
             keywords: m.keywords,
             activation: m.activation,
+            invocation: m.invocation,
             permissions: m.permissions,
             enabled: !disabled.contains(&m.id),
             pinned: pinned.contains(&m.id),
+            has_settings: !m.settings.is_empty(),
             icon,
             icon_url,
             dir: dir.to_string_lossy().to_string(),

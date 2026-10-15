@@ -1,37 +1,33 @@
 // 内置轻应用：锁屏。
 //
-// **唤起即执行**：这类应用的价值就在于"打完字回车，屏幕锁了"，
-// 再要求用户点一次按钮是把一步能做完的事拆成两步。
-//
-// 但失败必须有反馈：锁屏失败时窗口保持打开并显示原因，
-// 成功才 close —— 否则用户面对一个"什么都没发生"的窗口会以为软件卡了。
+// 声明了 `"invocation": "direct"`，宿主唤起它时不显示任何面板、窗口也一并收起，
+// 一步做完。成功就关掉；**失败必须让用户看见原因** —— 静默失败会让人以为
+// 软件卡了，所以这里用 setPanel 把错误顶出来，面板也就随之出现。
 
 import { connect } from './sdk.js'
-
-const out = document.getElementById('msg')
 
 async function main() {
   const kb = await connect()
 
   if (!kb.system?.lockScreen) {
-    out.textContent = '未授予 system:lock-screen 权限'
-    out.classList.remove('muted')
+    kb.setPanel({ title: '锁屏 · 出错', height: 140, render: (box) => {
+      box.textContent = '未授予 system:lock-screen 权限'
+    } })
     return
   }
 
-  out.textContent = '正在锁屏…'
   try {
     await kb.system.lockScreen()
-    // 锁屏后屏幕就黑了，用户看不见任何提示；
-    // 这里的文字留到下次唤起（iframe 重建）时才读得到
-    kb.close()
+    kb.close() // 屏幕都黑了，没什么可展示的
   } catch (e) {
-    out.textContent = `锁屏失败：${e.message ?? e}`
-    out.classList.remove('muted')
+    kb.setPanel({ title: '锁屏 · 出错', height: 160, render: (box) => {
+      box.textContent = `锁屏失败：${e.message ?? e}`
+    } })
   }
 }
 
 main().catch((e) => {
-  out.textContent = `连接宿主失败：${e.message ?? e}`
-  out.classList.remove('muted')
+  // 连宿主都没连上：说明桥接断了，同样要显示而不是沉默
+  document.body.textContent = `连接宿主失败：${e.message ?? e}`
+  document.body.style.cssText = 'padding:12px;color:rgba(255,255,255,.92);font:13px system-ui'
 })

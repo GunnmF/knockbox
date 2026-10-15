@@ -532,7 +532,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                 <button onClick={() => void pluginSetPinned(p.id, !p.pinned).then(refresh)}>
                   {p.pinned ? '取消钉住' : '钉住'}
                 </button>
-                <button onClick={() => void openSettings(p.id)}>设置</button>
+                {/* 没声明 settings 的应用不显示这个按钮 ——
+                    摆一个点开只会提示"没有设置项"的按钮是纯噪音 */}
+                {p.hasSettings && <button onClick={() => void openSettings(p.id)}>设置</button>}
                 <button onClick={() => void pluginSetEnabled(p.id, !p.enabled).then(refresh)}>
                   {p.enabled ? '禁用' : '启用'}
                 </button>

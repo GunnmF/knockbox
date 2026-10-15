@@ -478,6 +478,8 @@ pub struct PluginMeta {
     pub keywords: Vec<String>,
     pub activation: crate::core::manifest::Activation,
     pub permissions: Vec<String>,
+    /// 被唤起后怎么呈现：panel = 弹界面，direct = 静默执行
+    pub invocation: crate::core::manifest::Invocation,
     /// `plugin.json` 里 `settings` 的声明，宿主据此自动生成设置界面
     pub settings: Vec<crate::core::manifest::SettingDef>,
 }
@@ -493,6 +495,7 @@ pub fn plugin_meta(id: String) -> Result<PluginMeta, String> {
         keywords: m.keywords,
         activation: m.activation,
         permissions: m.permissions,
+        invocation: m.invocation,
         settings: m.settings,
     })
 }
@@ -564,9 +567,11 @@ mod tests {
             author: None,
             keywords: keywords.iter().map(|s| s.to_string()).collect(),
             activation: Activation::default(),
+            invocation: Default::default(),
             permissions: vec![],
             enabled,
             pinned,
+            has_settings: false,
             icon: None,
             icon_url: None,
             dir: String::new(),

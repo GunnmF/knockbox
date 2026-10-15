@@ -6,6 +6,13 @@
   "entry": "index.html",
   "icon": "icon.svg",
   "author": "knockbox",
-  "keywords": ["锁屏", "lock", "锁"],
-  "permissions": ["system:lock-screen"]
+  "keywords": [
+    "锁屏",
+    "lock",
+    "锁"
+  ],
+  "permissions": [
+    "system:lock-screen"
+  ],
+  "invocation": "direct"
 }

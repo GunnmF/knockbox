@@ -112,10 +112,17 @@ export interface Knockbox {
   }
   readonly screen: {
     /**
-     * 截取整屏。返回保存到本机的文件路径 —— 不是图片内容：
-     * 一张 4K PNG 转 base64 有好几 MB，穿 postMessage 不划算。
+     * 截屏。
+     *
+     * `mode: 'region'` 会弹出系统自带的选区界面拖框挑区域，
+     * `'full'`（默认）是整屏。返回值里 `dataUrl` 供插件在画布上做标记和
+     * 取色；超过 8MB 的图不会带 `dataUrl`，只有 `path`。
      */
-    capture(): Promise<{ path: string }>
+    capture(opts?: {
+      mode?: 'full' | 'region'
+      cursor?: boolean
+      format?: 'png' | 'jpg'
+    }): Promise<{ path: string; bytes: number; dataUrl?: string }>
   }
   readonly shell: {
     openUrl(url: string): Promise<void>
@@ -188,7 +195,12 @@ export async function connect(): Promise<Knockbox> {
       lockScreen: () => send<void>('system.lockScreen'),
     },
     screen: {
-      capture: () => send<{ path: string }>('screen.capture'),
+      capture: (opts) =>
+        send<{ path: string; bytes: number; dataUrl?: string }>('screen.capture', {
+          mode: opts?.mode ?? 'full',
+          cursor: opts?.cursor ?? false,
+          format: opts?.format ?? 'png',
+        }),
     },
     shell: {
       openUrl: (url: string) => send<void>('shell.openUrl', { url }),
@@ -296,20 +308,39 @@ function mountPanel(render: (container: HTMLElement, ctx: PanelContext) => void,
  * 按权限裁剪 API：没声明的方法直接不存在。
  * SDK 层的这道裁剪不是安全措施（真正的关卡在 Rust 侧的 dispatch），
  * 但它能让插件作者在开发期就拿到明确反馈。
+ *
+ * 注意是**按方法**裁剪，不是按分组。一组里的方法可能属于不同权限 ——
+ * `kb.system` 下 `getSelection` 要 `system:selection`、`lockScreen` 要
+ * `system:lock-screen`。早前按组删除，导致只声明了后者的插件（比如锁屏）
+ * 会因为前者没声明而把整个 `system` 删掉，连已授权的方法也一起没了。
+ * 整组被清空之后才把组本身删掉，这样"完全没声明"时作者拿到的仍是 undefined。
  */
 function pruneByPermissions(kb: Knockbox, granted: Set<string>): Knockbox {
   const target = kb as unknown as Record<string, unknown>
   for (const [method, permission] of Object.entries(PERMISSION_MAP)) {
-    if (!granted.has(permission)) {
-      delete target[methodGroup(method)]
+    if (granted.has(permission)) continue
+    const [group, action] = method.split('.')
+    if (!action) {
+      delete target[group]
+      continue
+    }
+    const holder = target[group]
+    if (!holder) continue
+    // kb.history(limit) 这种是函数而不是对象，没法只删一个方法，只能整个删
+    if (typeof holder === 'function') {
+      delete target[group]
+      continue
+    }
+    delete (holder as Record<string, unknown>)[action]
+  }
+
+  for (const group of ['clipboard', 'system', 'shell', 'storage', 'screen']) {
+    const holder = target[group]
+    if (holder && typeof holder === 'object' && Object.keys(holder as object).length === 0) {
+      delete target[group]
     }
   }
   return kb
-}
-
-function methodGroup(method: string): string {
-  const [group, action] = method.split('.')
-  return action ? group : method
 }
 
 export default connect

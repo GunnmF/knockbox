@@ -28,6 +28,10 @@ pub struct Manifest {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub activation: Activation,
+    /// 被唤起后怎么呈现。`panel`（默认）弹出面板让用户操作；`direct` 静默执行，
+    /// 用于"锁屏""截图"这类一步就能做完、不需要界面的应用。
+    #[serde(default)]
+    pub invocation: Invocation,
     #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(default, rename = "web:allowed-domains")]
@@ -46,6 +50,17 @@ pub enum Activation {
     Keyword,
     /// 仅用户主动点开
     Manual,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Invocation {
+    /// 弹出面板，用户在插件自己的界面里操作
+    #[default]
+    Panel,
+    /// 静默执行，不显示任何界面。插件做完应当调用 `kb.close()`；
+    /// 需要反馈时调用 `kb.setPanel()`，面板才会出现。
+    Direct,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

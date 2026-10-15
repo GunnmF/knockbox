@@ -45,6 +45,10 @@ export interface InstalledPlugin {
   enabled: boolean
   /** 是否钉在启动器里。只有钉住的才会出现在搜索结果中。 */
   pinned: boolean
+  /** direct 的应用唤起后静默执行，不显示界面 */
+  invocation: Invocation
+  /** 是否声明了 settings。没声明就不该显示「设置」按钮。 */
+  hasSettings: boolean
   icon: string | null
   dir: string
 }
@@ -56,6 +60,9 @@ export interface InstallResult {
   permissions: string[]
   updated: boolean
 }
+
+/** 被唤起后怎么呈现：panel = 弹界面让用户操作，direct = 静默执行 */
+export type Invocation = 'panel' | 'direct'
 
 export type SettingKind = 'string' | 'number' | 'boolean' | 'select' | 'text'
 
@@ -77,6 +84,7 @@ export interface PluginMeta {
   keywords: string[]
   activation: 'keyword' | 'manual'
   permissions: string[]
+  invocation: Invocation
   settings: SettingDef[]
 }
 

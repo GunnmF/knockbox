@@ -65,6 +65,7 @@ my-plugin/
 | `homepage` | string | | 主页 URL |
 | `keywords` | string[] | | 唤起关键词。输入框匹配到关键词时，该插件排在结果首位 |
 | `activation` | enum | | `keyword`（默认，输入关键词即接管）/ `manual`（仅用户主动点开） |
+| `invocation` | enum | | `panel`（默认，弹出面板让用户操作）/ `direct`（静默执行，不显示界面） |
 | `permissions` | string[] | | 能力白名单，见 §4。**未声明的能力一律不可用** |
 | `settings` | object[] | | 设置项声明，Knockbox 自动生成设置界面，见 §5 |
 | `minKnockboxVersion` | string | | 最低宿主版本，不满足则拒绝安装 |
@@ -275,6 +276,11 @@ kb.hide()                                    // 等同 close 的语义别名
 // 宿主 -> 插件（失败：权限不足 / 参数错误 / 宿主内部错误）
 { "kb": 1, "id": 7, "ok": false, "error": { "code": "PERMISSION_DENIED", "message": "..." } }
 ```
+
+**为什么插件页需要宿主发 CORS 头**：插件跑在 `sandbox` 不含 `allow-same-origin` 的 iframe 里，
+origin 是 `null`；而 ES module 一律按 CORS 模式请求。宿主若不发
+`Access-Control-Allow-Origin`，`<script type="module">` 会被浏览器直接拦掉——
+表现为"点了插件毫无反应"，因为插件的 JS 压根没跑起来。
 
 **错误码**：`PERMISSION_DENIED` / `INVALID_PARAMS` / `NOT_FOUND` / `RATE_LIMITED` / `HOST_CLOSED` / `INTERNAL`
 

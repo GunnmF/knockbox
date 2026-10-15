@@ -1,11 +1,39 @@
 {
   "id": "com.knockbox.screencap",
   "name": "截图",
-  "version": "1.0.0",
-  "description": "截取整屏并保存到桌面",
+  "version": "2.0.0",
+  "description": "区域截图、简单标记、取色器",
   "entry": "index.html",
   "icon": "icon.svg",
   "author": "knockbox",
-  "keywords": ["截图", "截屏", "screenshot", "capture"],
-  "permissions": ["screen:capture", "shell:open-path"]
+  "keywords": ["截图", "截屏", "screenshot", "capture", "取色", "标记"],
+  "permissions": ["screen:capture", "shell:open-path", "clipboard:write"],
+  "settings": [
+    {
+      "key": "defaultMode",
+      "label": "默认截图范围",
+      "type": "select",
+      "options": ["区域", "全屏"],
+      "default": "区域"
+    },
+    {
+      "key": "includeCursor",
+      "label": "包含鼠标指针",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "format",
+      "label": "图片格式",
+      "type": "select",
+      "options": ["png", "jpg"],
+      "default": "png"
+    },
+    {
+      "key": "autoOpen",
+      "label": "保存后自动打开",
+      "type": "boolean",
+      "default": true
+    }
+  ]
 }

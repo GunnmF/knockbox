@@ -125,6 +125,23 @@ fn check_permission(manifest: &Manifest, method: &str) -> Result<(), PluginError
 
 /// 校验并执行一次 SDK 调用。
 pub fn dispatch(plugin_id: &str, method: &str, params: Value) -> Result<Value, PluginError> {
+    // 诊断开关：把每次 SDK 调用的结果打出来。插件链路有四层
+    // （模块加载 → 握手 → 权限 → 执行），没有这行就只能靠猜。
+    let log = std::env::var_os("KNOCKBOX_LOG_ASSETS").is_some();
+    if log {
+        eprintln!("[call] {plugin_id} {method}");
+    }
+    let result = dispatch_inner(plugin_id, method, params);
+    if log {
+        match &result {
+            Ok(v) => eprintln!("[call]   → ok {v}"),
+            Err(e) => eprintln!("[call]   → {} {}", e.code(), e),
+        }
+    }
+    result
+}
+
+fn dispatch_inner(plugin_id: &str, method: &str, params: Value) -> Result<Value, PluginError> {
     let installed = store::get(plugin_id).ok_or_else(|| {
         PluginError::NotFound(format!("插件 {plugin_id} 未安装"))
     })?;
@@ -186,7 +203,40 @@ pub fn dispatch(plugin_id: &str, method: &str, params: Value) -> Result<Value, P
         "settings.get" => Ok(serde_json::json!(plugin_settings(plugin_id))),
         "pushResult" | "setPanel" => Ok(Value::Null), // 纯前端行为，宿主无需处理
         "system.lockScreen" => lock_screen().map_err(PluginError::Internal),
-        "screen.capture" => screen_capture(&manifest.web_allowed_domains).map_err(PluginError::Internal),
+        "screen.capture" => {
+            // 参数由插件从它自己的设置项拼来，这里只做形状与取值校验
+            let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("full");
+            let with_cursor = params
+                .get("cursor")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let format = params.get("format").and_then(|v| v.as_str()).unwrap_or("png");
+            if !matches!(mode, "full" | "region") {
+                return Err(PluginError::InvalidParams("mode 只能是 full 或 region".into()));
+            }
+            if !matches!(format, "png" | "jpg") {
+                return Err(PluginError::InvalidParams("format 只能是 png 或 jpg".into()));
+            }
+            screen_capture(mode, with_cursor, format).map_err(PluginError::Internal)
+        }
+        "screen.save" => {
+            // 插件在画布上标记完，需要把成品落盘。宿主只提供"打开路径"，
+            // 没有写文件的能力，所以这里补一个 —— 但**只能写进截图目录**，
+            // 且文件名由宿主生成：不能让插件往任意路径写东西。
+            let data_url = params
+                .get("dataUrl")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| PluginError::InvalidParams("缺少 dataUrl".into()))?;
+            let tag = params
+                .get("tag")
+                .and_then(|v| v.as_str())
+                .unwrap_or("edited")
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .take(16)
+                .collect::<String>();
+            screen_save(data_url, &tag).map_err(PluginError::Internal)
+        }
         "close" => Ok(Value::Null),
         "notify" => Ok(Value::Null),
         _ => Err(PluginError::UnknownMethod(method.to_string())),
@@ -423,11 +473,19 @@ fn lock_screen() -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-/// 截屏。存到桌面的「Knockbox 截图」目录，返回文件路径。
+/// 截屏。存到桌面的「Knockbox 截图」目录。
 ///
-/// 返回路径而不是图片内容：图片可能好几 MB，走 postMessage 传给 iframe 既慢
-/// 又没必要，插件拿到路径后自己决定往哪放。
-fn screen_capture(_allowed: &[String]) -> Result<Value, String> {
+/// `mode`：
+/// - `full` —— 整屏
+/// - `region` —— 弹出系统自带的选区界面（十字光标拖框）。
+///   这里用系统的选择器而不是自绘全屏浮层：后者要新建一个透明置顶窗口、
+///   处理拖拽与多显示器，是个能单独做一周的活；系统选择器是原生交互、
+///   零维护，能力上等价。
+///
+/// 返回 `path`（落盘文件）**和** `dataUrl`：插件要在自己的画布上做标记和
+/// 取色，就必须拿到图像本身；走 data URL 免得插件再去碰本机文件系统。
+/// 超过 8MB 就只给路径，避免超大图穿 postMessage 把界面卡住。
+fn screen_capture(mode: &str, with_cursor: bool, format: &str) -> Result<Value, String> {
     #[cfg(target_os = "macos")]
     {
         let dir = dirs::desktop_dir()
@@ -435,28 +493,48 @@ fn screen_capture(_allowed: &[String]) -> Result<Value, String> {
             .join("Knockbox 截图");
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建截图目录失败: {e}"))?;
 
-        // 时间戳文件名，天然不会覆盖
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis())
             .unwrap_or(0);
-        let path = dir.join(format!("截屏-{stamp}.png"));
+        let path = dir.join(format!("截屏-{stamp}.{format}"));
 
-        let out = std::process::Command::new("screencapture")
-            .arg("-x") // 静音，不播放快门声
-            .arg("-C") // 连鼠标指针一起截
-            .arg(&path)
-            .output()
-            .map_err(|e| format!("调用 screencapture 失败: {e}"))?;
+        let mut cmd = std::process::Command::new("screencapture");
+        cmd.arg("-x"); // 静音，不播放快门声
+        if with_cursor {
+            cmd.arg("-C");
+        }
+        match mode {
+            // -i = 系统自带的选区/窗口选择界面
+            "region" => {
+                cmd.arg("-i");
+            }
+            _ => {}
+        }
+        cmd.arg("-t").arg(format).arg(&path);
 
-        if !out.status.success() {
-            // macOS 10.15+ 截图需要「屏幕录制」权限，被拒时这里拿不到具体原因
+        let out = cmd.output().map_err(|e| format!("调用 screencapture 失败: {e}"))?;
+
+        // 用户在选区界面点了取消时 screencapture 正常退出但不产出文件
+        if !path.exists() {
+            if out.status.success() {
+                return Err("已取消截图".into());
+            }
             return Err("截屏失败。请到「系统设置 → 隐私与安全性 → 屏幕录制」里允许 Knockbox".into());
         }
-        if !path.exists() {
-            return Err("截屏失败：没有生成文件，可能被系统拒绝了".into());
+
+        let bytes = std::fs::read(&path).map_err(|e| format!("读取截图失败: {e}"))?;
+        let mut result = serde_json::Map::new();
+        result.insert("path".into(), Value::String(path.to_string_lossy().to_string()));
+        result.insert("bytes".into(), serde_json::json!(bytes.len()));
+        if bytes.len() <= 8 * 1024 * 1024 {
+            let mime = if format == "jpg" { "image/jpeg" } else { "image/png" };
+            result.insert(
+                "dataUrl".into(),
+                Value::String(format!("data:{mime};base64,{}", base64_encode(&bytes))),
+            );
         }
-        Ok(serde_json::json!({ "path": path.to_string_lossy() }))
+        Ok(Value::Object(result))
     }
     #[cfg(target_os = "windows")]
     {
@@ -664,6 +742,7 @@ mod tests {
             homepage: None,
             keywords: vec![],
             activation: Default::default(),
+            invocation: Default::default(),
             permissions: vec![],
             web_allowed_domains: vec![],
             settings: vec![],

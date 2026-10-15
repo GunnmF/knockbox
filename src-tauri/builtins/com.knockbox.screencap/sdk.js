@@ -181,18 +181,39 @@ function mountPanel(render, send) {
  * 按权限裁剪 API：没声明的方法直接不存在。
  * SDK 层的这道裁剪不是安全措施（真正的关卡在 Rust 侧的 dispatch），
  * 但它能让插件作者在开发期就拿到明确反馈。
+ *
+ * 注意是**按方法**裁剪，不是按分组。一组里的方法可能属于不同权限 ——
+ * `kb.system` 下 `getSelection` 要 `system:selection`、`lockScreen` 要
+ * `system:lock-screen`。早前按组删除，导致只声明了后者的插件（比如锁屏）
+ * 会因为前者没声明而把整个 `system` 删掉，连已授权的方法也一起没了。
+ * 整组被清空之后才把组本身删掉，这样"完全没声明"时作者拿到的仍是 undefined。
  */
 function pruneByPermissions(kb, granted) {
     const target = kb;
     for (const [method, permission] of Object.entries(PERMISSION_MAP)) {
-        if (!granted.has(permission)) {
-            delete target[methodGroup(method)];
+        if (granted.has(permission))
+            continue;
+        const [group, action] = method.split('.');
+        if (!action) {
+            delete target[group];
+            continue;
+        }
+        const holder = target[group];
+        if (!holder)
+            continue;
+        // kb.history(limit) 这种是函数而不是对象，没法只删一个方法，只能整个删
+        if (typeof holder === 'function') {
+            delete target[group];
+            continue;
+        }
+        delete holder[action];
+    }
+    for (const group of ['clipboard', 'system', 'shell', 'storage', 'screen']) {
+        const holder = target[group];
+        if (holder && typeof holder === 'object' && Object.keys(holder).length === 0) {
+            delete target[group];
         }
     }
     return kb;
-}
-function methodGroup(method) {
-    const [group, action] = method.split('.');
-    return action ? group : method;
 }
 export default connect;

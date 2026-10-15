@@ -1,6 +1,6 @@
 [package]
 name = "knockbox"
-version = "0.1.16"
+version = "0.1.18"
 description = "叩叩 — 轻量跨平台启动器"
 authors = ["knockbox"]
 edition = "2021"
