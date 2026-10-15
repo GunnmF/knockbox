@@ -99,10 +99,16 @@
   `bundle/nsis/` 和 `bundle/msi/`。曾在上传步骤里写 `"$macos_dir"/*.dmg` 直接
   `no matches found` 挂掉。另外 Windows 只认 NSIS 的 `exe.zip` 作为更新产物，
   `msi.zip` 不保证生成 —— 上传步骤要用「存在才传」的方式，别写死路径
-- **想在 mac 上查 Windows 能不能编译**：`rustup target add x86_64-pc-windows-msvc`
-  然后 `cargo check --target x86_64-pc-windows-msvc`。**check 不链接**，所以不需要
-  装 MSVC 工具链，几分钟就能把跨平台编译错误全部暴露出来，比等 CI 快得多
-  （跨平台错误第一次就是靠它抓到的：`RunEvent::Reopen` 只在 macOS/iOS 有）
+- **Windows 的编译错误只能在 Windows CI 上发现**。曾以为 `rustup target add
+  x86_64-pc-windows-msvc` + `cargo check --target` 能在 mac 上交叉检查，**不行**：
+  tauri 依赖树里有含 C 代码的 crate（如 `ring`），cc-rs 需要 MSVC 的 C 头文件，
+  换 GNU 目标也一样缺头文件。所以别指望本机验证，改为**在推 master 时就跑**：
+  `.github/workflows/ci.yml` 在两平台上 `pnpm tauri build --no-bundle` + `cargo test`，
+  不碰 Release 也不碰私钥。发版前的编译问题在这里就该暴露，而不是等 tag
+- **依赖别乱放进 `[target.'cfg(target_os = "macos")'.dependencies]`**：
+  `walkdir`/`zip`/`sha2` 都曾是跨平台依赖却被归到 macOS 段（只有 `objc` 真是
+  macOS 专属），Windows 编译直接 E0432/E0433「找不到 crate」。加新依赖时先问
+  一句「Windows 上用不用」，用就必须放 `[dependencies]`
 - **dmg 打包偶发失败**：`bundle_dmg.sh` 中途崩掉时会把临时镜像
   （`target/release/bundle/macos/rw.*.dmg`）留在挂载状态，下一次构建直接挂。
   先 `hdiutil info | grep -i knockbox` 找出残留，`diskutil eject diskN` 推掉再重跑
@@ -327,6 +333,11 @@ cargo check && cargo test             # 10/10 通过
 | 17 | 文字输入框在画布 `pointerdown` 里创建，没 `preventDefault` | mousedown 默认行为在 React 处理器**之后**把焦点抢回画布，输入框当场失焦 → 空值提交销毁 → 文字工具"点了没反应"。**合成事件测不出来，只有真机 trusted 事件才复现** —— 浏览器测试要单独注意这一点 |
 | 18 | `lib.rs` 无条件 `match tauri::RunEvent::Reopen` | 该变体**只在 macOS/iOS 存在** → Windows 编译 E0599，整个 Windows job 编不出来（首次双平台 CI 才暴露） |
 | 19 | Windows 的 `screen_capture_full` 写死 PNG、只回 `path` | 「保存格式」设置在 Windows 上无效；插件拿不到图像就没法在自己的画布上标记（macOS 分支有 `dataUrl`）→ 两平台行为不一致，已对齐 |
+| 20 | `walkdir`/`zip`/`sha2` 被放进 macOS 专属依赖段 | **Windows 编译直接失败**（E0432/E0433 找不到 crate），三个都是全平台都在用的（文件遍历兜底 / 解包安装插件 / 完整性校验）—— 依赖分组错了，与业务逻辑无关 |
+
+> 18–20 三条都是首次双平台 CI 才暴露的，根因是**此前只在 macOS 上编译过**。
+> 已加 `ci.yml`：推 master 就在 mac + Windows 上跑 `tauri build --no-bundle` + `cargo test`，
+> 不用等到打 tag 才发现编不过。
 
 ### 🔴 仍未做：权限逐条确认（最大的模型空洞）
 
@@ -350,7 +361,9 @@ cargo check && cargo test             # 10/10 通过
 - **`secret: true` 仍是明文**，且 `settings.get` 是 `AlwaysAllowed`
 - **托盘菜单的「设置…」只是 show 主窗口**，不会切到设置页
 - **`@knockbox/plugin-sdk` 未发布**；`examples/hello/sdk.js` 由 `tsc` 从 `src/sdk/index.ts` 同步而来
-- **Windows 完全没验证过**
+- **Windows 运行时完全没验证过**：`ci.yml` 从 v0.2.11 起会在 Windows 上真的编译一遍
+  （能挡住跨平台编译错误），但**没人在 Windows 上跑过这个应用**——截图冻结帧、
+  多屏几何、托盘、快捷键在 Windows 上的实际行为都还是未知数
 
 ### 🟡 环境坑（务必记住）
 

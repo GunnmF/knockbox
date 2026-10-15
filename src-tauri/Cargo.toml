@@ -24,14 +24,19 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "7"
+# 这三个是**跨平台**依赖，别放进下面的 macOS 分组：
+#   walkdir —— core/files.rs 的目录遍历兜底（Windows 没装 Everything 时全靠它）
+#   zip     —— plugins/source.rs 解包安装插件
+#   sha2    —— plugins/source.rs 的完整性校验
+# 曾被错放进 macOS 分组 → Windows 编译时 E0432/E0433 "找不到 crate"
+walkdir = "2"
+sha2 = "0.10"
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 
 # 截图覆盖层要把窗口 level 抬到菜单栏之上（不然屏幕顶部一条永远选不中），
 # 只能拿 NSWindow 句柄自己 setLevel:。objc 是纯 FFI 宏，零构建成本。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
-walkdir = "2"
-sha2 = "0.10"
-zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 
 [features]
 default = ["custom-protocol"]
