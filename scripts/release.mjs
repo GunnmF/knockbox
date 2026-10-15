@@ -14,6 +14,7 @@
  *   pnpm release --no-build   # 只升版本号，不编译
  *   pnpm release:publish      # **日常发版就这一条**：升版本 → 提交 → 打 tag →
  *                             #   推送，剩下交给 CI（编译/签名/上传/update.json）
+ *   pnpm release:publish --dry-run   # 同上但只预演，不改文件不提交不推送
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, copyFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
