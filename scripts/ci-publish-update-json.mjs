@@ -22,7 +22,10 @@ const { TAG: _t, MAC_ASSET, MAC_SIG, WIN_ASSET, WIN_SIG, GH_TOKEN, GITHUB_OUTPUT
   process.env
 
 if (!tag) {
-  console.error('✗ 缺少 TAG 环境变量')
+  console.error('✗ 缺少 TAG 环境变量（tag 形如 "v" 也是空）')
+  console.error('  TAG 来自 needs.macos.outputs.version，所以这基本只有一个原因：')
+  console.error('  macOS 或 Windows 的构建 job 失败了/被取消，没有产出可用的产物名。')
+  console.error('  先去看那两个 job 的失败原因，修好之后重跑本 job。')
   process.exit(1)
 }
 if (!MAC_ASSET || !MAC_SIG) {

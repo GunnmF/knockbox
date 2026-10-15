@@ -136,6 +136,10 @@ jobs:
   publish-update-json:
     name: 生成 update.json
     needs: [macos, windows]
+    # 显式声明依赖必须成功：默认行为虽然也是「依赖失败就跳过」，但一旦点了
+    # "Re-run failed jobs"，GitHub 会把这个 job 也拉起来跑，而此时
+    # needs.*.outputs 全是空 → 报「缺少 TAG」，看起来像是本 job 的问题
+    if: needs.macos.result == 'success' && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
