@@ -94,11 +94,27 @@
   - `pnpm publish-update` —— 本机构建 + 本机签名 + 上传（Windows 包需要先放进 `release-in/windows/`）
   - `pnpm sign-release` —— 只对 Release 上已有的产物签名并生成 update.json
 - 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
-- **产物目录是分开的，glob 一定要按目录来**：`bundle/macos/` 放 `*.app` 和
+- **两平台的 updater 产物形态不一样，别拿 v1 的记忆写 v2**：
+
+  | 平台 | 更新产物 | 签名 | 位置 |
+  |---|---|---|---|
+  | macOS | `Knockbox.app.tar.gz` | `.app.tar.gz.sig` | `bundle/macos/` |
+  | Windows | **`Knockbox_<v>_x64-setup.exe`（安装器本身）** | `.exe.sig` | `bundle/nsis/` |
+
+  Tauri **v1** 的 Windows 更新包是 `.nsis.zip`，**v2 去掉了 zip**——客户端直接
+  下载安装器 exe 并用 update.json 里的 signature 校验。CI 和本地兜底脚本一度都按
+  v1 写成 zip，于是 `bundle/nsis/*.zip` 永远找不到（Windows job 报错），而就算
+  真打出来，客户端也会因签名对不上而拒绝更新。dmg 只给人手动下载，不参与更新。
+- **产物目录是分开的，glob 一定要带目录**：`bundle/macos/` 放 `*.app` 和
   `*.app.tar.gz`(+`.sig`)，**dmg 在平级的 `bundle/dmg/`**；Windows 则是
-  `bundle/nsis/` 和 `bundle/msi/`。曾在上传步骤里写 `"$macos_dir"/*.dmg` 直接
-  `no matches found` 挂掉。另外 Windows 只认 NSIS 的 `exe.zip` 作为更新产物，
-  `msi.zip` 不保证生成 —— 上传步骤要用「存在才传」的方式，别写死路径
+  `bundle/nsis/` 和 `bundle/msi/`。更隐蔽的一种写法是
+  `$(cd "$B/dmg" && ls *.dmg)` —— `cd` 之后的相对路径只剩**文件名**，传给 `gh`
+  时按工作目录解析就找不到文件了。要用 `ls "$B"/dmg/*.dmg` 这种一路带目录的
+- **Windows 上 PowerShell 的两个坑**：`$ErrorActionPreference = "Stop"` 下，
+  原生命令（`gh`）只要往 stderr 写东西并返回非 0，PS 7.3+ 会抛成**终止性错误**，
+  于是「release 不存在就创建」这种判断会直接炸掉 —— 用 `try { ... } catch { }`
+  包一层，只认 `$LASTEXITCODE`。另外 `Get-ChildItem` 对不存在的路径要加
+  `-ErrorAction SilentlyContinue`，否则同样被 Stop 打断
 - **Windows 的编译错误只能在 Windows CI 上发现**。曾以为 `rustup target add
   x86_64-pc-windows-msvc` + `cargo check --target` 能在 mac 上交叉检查，**不行**：
   tauri 依赖树里有含 C 代码的 crate（如 `ring`），cc-rs 需要 MSVC 的 C 头文件，
@@ -334,6 +350,8 @@ cargo check && cargo test             # 10/10 通过
 | 18 | `lib.rs` 无条件 `match tauri::RunEvent::Reopen` | 该变体**只在 macOS/iOS 存在** → Windows 编译 E0599，整个 Windows job 编不出来（首次双平台 CI 才暴露） |
 | 19 | Windows 的 `screen_capture_full` 写死 PNG、只回 `path` | 「保存格式」设置在 Windows 上无效；插件拿不到图像就没法在自己的画布上标记（macOS 分支有 `dataUrl`）→ 两平台行为不一致，已对齐 |
 | 20 | `walkdir`/`zip`/`sha2` 被放进 macOS 专属依赖段 | **Windows 编译直接失败**（E0432/E0433 找不到 crate），三个都是全平台都在用的（文件遍历兜底 / 解包安装插件 / 完整性校验）—— 依赖分组错了，与业务逻辑无关 |
+| 21 | 上传步骤写 `$(cd "$B/dmg" && ls *.dmg)` | `cd` 之后只剩文件名，`gh` 按工作目录解析找不到文件 → macOS 发布必挂（dmg 本身是正常产出的） |
+| 22 | 按 Tauri **v1** 的印象找 `bundle/nsis/*.zip` 当 Windows 更新产物 | v2 的 Windows 更新包就是安装器 `*.exe`（签名 `*.exe.sig`），没有 zip —— 找不到就抛错；就算真打成 zip，客户端也会因签名对不上拒绝更新。CI 与两个本地兜底脚本都写错了 |
 
 > 18–20 三条都是首次双平台 CI 才暴露的，根因是**此前只在 macOS 上编译过**。
 > 已加 `ci.yml`：推 master 就在 mac + Windows 上跑 `tauri build --no-bundle` + `cargo test`，

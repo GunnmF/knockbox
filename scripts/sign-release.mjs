@@ -153,16 +153,15 @@ if (macAsset) {
 }
 
 if (winExe) {
+  // Windows 端更新产物就是安装器 exe 本身，签名是 .exe.sig。
+  // 不要再打成 zip（v1 的做法）—— v2 客户端下载 exe 后校验 exe.sig，
+  // 换成 zip 签名就对不上，更新必失败。
   const exe = download(winExe)
-  // Windows 端更新产物是 zip（装 nsis 安装器），不是裸 exe
-  const zipName = winExe.name.replace(/\.exe$/i, '.zip')
-  const zipPath = join(work, zipName)
-  execFileSync('zip', ['-j', '-q', '-FS', zipPath, exe])
   platforms['windows-x86_64'] = {
-    signature: sign(zipPath),
-    url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${zipName}`,
+    signature: sign(exe),
+    url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${winExe.name}`,
   }
-  upload(zipPath, 'application/zip')
+  upload(exe, 'application/vnd.microsoft.portable-executable')
 }
 
 // —— 4. update.json：客户端只认这一个文件 ——

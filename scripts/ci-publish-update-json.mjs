@@ -36,7 +36,8 @@ const platforms = {
   'darwin-aarch64': { signature: MAC_SIG.trim(), url: url(MAC_ASSET) },
 }
 if (WIN_ASSET && WIN_SIG) {
-  // Windows 更新产物是 zip（装着 nsis 安装器），平台键是 OS-ARCH，没有 -msvc 后缀
+  // Windows 的更新产物就是 NSIS 安装器 exe 本身（平台键是 OS-ARCH，没有 -msvc 后缀），
+  // 不是 zip —— 客户端下载 exe 后用这里给的 signature 校验 exe.sig
   platforms['windows-x86_64'] = { signature: WIN_SIG.trim(), url: url(WIN_ASSET) }
 } else {
   console.log('· 没有 Windows 产物，本次 update.json 只含 macOS')

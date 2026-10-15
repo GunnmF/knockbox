@@ -92,32 +92,25 @@ if (existsSync(windowsDir)) {
     process.env.TAURI_SIGNING_PRIVATE_KEY ?? join(homedir(), '.tauri', 'knockbox.key')
 
   if (nsisExe) {
-    // Windows 端的更新产物是 **zip**（装 nsis 装器），不是裸 exe
-    const zipName = nsisExe.replace(/\.exe$/i, '.zip')
-    const zipPath = join(outDir, zipName)
-    execFileSync('zip', ['-j', '-q', '-FS', zipPath, join(windowsDir, nsisExe)])
+    // Windows 端的更新产物就是 **NSIS 安装器 exe 本身**，签名是它的 .exe.sig。
+    // 别再打成 zip（Tauri v1 才是 .nsis.zip，v2 客户端直接下载 exe 校验 .exe.sig，
+    // 给 zip 的话签名对不上，更新会直接失败）。
+    const exePath = join(windowsDir, nsisExe)
+    const outExe = join(outDir, nsisExe)
+    copyFileSync(exePath, outExe)
     // --app-version 把版本号写进签名的受保护部分，客户端据此拒绝
     // "新版本号配旧包" 那种偷换（配合配置里的 requireSignedVersion）
     execFileSync(
       'npx',
-      [
-        'tauri',
-        'signer',
-        'sign',
-        '--app-version',
-        version,
-        '-f',
-        keyPath,
-        zipPath,
-      ],
+      ['tauri', 'signer', 'sign', '--app-version', version, '-f', keyPath, outExe],
       { cwd: root, stdio: 'inherit', env: { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' } },
     )
     platforms['windows-x86_64'] = {
-      signature: readFileSync(`${zipPath}.sig`, 'utf8').trim(),
-      url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${zipName}`,
+      signature: readFileSync(`${outExe}.sig`, 'utf8').trim(),
+      url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${nsisExe}`,
     }
-    extraAssets.push(zipName)
-    console.log(`  Windows 更新包：${zipName}`)
+    extraAssets.push(nsisExe, `${nsisExe}.sig`)
+    console.log(`  Windows 更新包：${nsisExe}`)
   }
   if (msi) {
     copyFileSync(join(windowsDir, msi), join(outDir, msi))

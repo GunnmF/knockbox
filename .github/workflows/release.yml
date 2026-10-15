@@ -70,19 +70,24 @@ jobs:
           # 是分支名（master），拿它当 tag 会建出一个叫 master 的 release
           VER=$(node -p "require('./package.json').version")
           TAG="v$VER"
-          # 注意产物是分目录的，别把 dmg 也在 macos/ 里找：
-          #   bundle/macos/  → *.app、*.app.tar.gz（+ .sig，updater 实际用的）
+          # 产物是分目录的：
+          #   bundle/macos/  → *.app、*.app.tar.gz（+ .sig）← updater 实际用的
           #   bundle/dmg/    → *.dmg（给人手动下载的）
+          # 路径必须一路带目录：写成 $(cd "$B/dmg" && ls *.dmg) 的话 cd 之后的
+          # 相对路径只剩文件名，传给 gh 时是相对仓库根目录解析的，找不到文件
           B=src-tauri/target/release/bundle
-          ls "$B"/macos/*.app.tar.gz "$B"/macos/*.app.tar.gz.sig >/dev/null \
-            || { echo "::error::没找到 updater 产物，确认 createUpdaterArtifacts 和签名私钥"; exit 1; }
-          TARBALL=$(cd "$B/macos" && ls *.app.tar.gz)
-          DMGS=$(cd "$B/dmg" && ls *.dmg)
+          TARBALL=$(ls "$B"/macos/*.app.tar.gz)
+          if [ ! -f "$TARBALL" ] || [ ! -f "$TARBALL.sig" ]; then
+            echo "::error::没找到 $TARBALL 或它的 .sig，确认 createUpdaterArtifacts 和签名私钥"
+            exit 1
+          fi
+          DMGS=$(ls "$B"/dmg/*.dmg 2>/dev/null || true)
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" "$B/macos/$TARBALL" "$B/macos/$TARBALL.sig" $DMGS --clobber
+          gh release upload "$TAG" "$TARBALL" "$TARBALL.sig" $DMGS --clobber
           {
-            echo "asset=$TARBALL"
-            echo "signature=$(cat "$B/macos/$TARBALL.sig")"
+            # asset 名必须是**文件名**（update.json 里拼的是 /releases/download/<tag>/<name>）
+            echo "asset=$(basename "$TARBALL")"
+            echo "signature=$(cat "$TARBALL.sig")"
             echo "version=$VER"
           } >> "$GITHUB_OUTPUT"
 
@@ -112,17 +117,21 @@ jobs:
           $ErrorActionPreference = "Stop"
           $tag = "v" + (Get-Content package.json | ConvertFrom-Json).version
           $root = "src-tauri/target/release/bundle"
-          # NSIS 的 exe.zip 才是 Windows updater 认的产物
-          $zip = (Get-ChildItem "$root/nsis/*.zip" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1)
-          if (-not $zip) { throw "没有找到 $root/nsis/*.zip，确认 createUpdaterArtifacts 与签名私钥" }
-          if (-not (Test-Path "$($zip.FullName).sig")) { throw "缺少签名文件 $($zip.Name).sig" }
-          # 只传实际存在的产物：msi.zip 不一定会生成（Windows 更新只用 NSIS 的 zip），
-          # 写死路径传不存在的文件会让 gh 直接报错
-          $files = @(Get-ChildItem "$root/nsis/*.exe", "$root/nsis/*.zip", "$root/nsis/*.zip.sig", "$root/msi/*.msi", "$root/msi/*.zip", "$root/msi/*.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
-          gh release view $tag *> $null; if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --generate-notes }
+          # Windows 的 updater 产物就是 **NSIS 安装器 exe 本身 + .exe.sig**，
+          # 没有 zip（Tauri v1 才有 .nsis.zip，v2 去掉了）。找 *.zip 永远找不到。
+          $exe = Get-ChildItem "$root/nsis/*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "没有找到 $root/nsis/*.exe，确认打包与 createUpdaterArtifacts" }
+          if (-not (Test-Path "$($exe.FullName).sig")) { throw "缺少签名文件 $($exe.Name).sig" }
+          # 只传实际存在的产物：msi 是给人手动装的，Windows 自动更新只用 nsis 那个
+          $files = @(Get-ChildItem "$root/nsis/*.exe", "$root/nsis/*.exe.sig", "$root/msi/*.msi", "$root/msi/*.msi.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          # `gh release view` 对不存在的 tag 会往 stderr 写并返回非 0。PowerShell 7.3+
+          # 在 $ErrorActionPreference=Stop 下会把原生命令的 stderr 抛成终止性错误，
+          # 这里用 try 包一层，只认 $LASTEXITCODE
+          try { gh release view $tag *> $null } catch { }
+          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --generate-notes }
           gh release upload $tag @files --clobber
-          "asset=$($zip.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "signature=$((Get-Content "$($zip.FullName).sig" -Raw).Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset=$($exe.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signature=$((Get-Content "$($exe.FullName).sig" -Raw).Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
   publish-update-json:
     name: 生成 update.json
