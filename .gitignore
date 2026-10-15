@@ -27,3 +27,4 @@ yarn-error.log*
 # 自更新发布产物（pnpm publish-update 的 staging 目录）
 /release-out
 /.env
+/release-in

@@ -25,7 +25,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/GunnmF/knockbox/releases) 下载对应系统的安装包（macOS 为 `.dmg`，Windows 为安装包）。
+从 [Releases](https://github.com/GunnmF/knockbox/releases) 下载对应系统的安装包：macOS 为 `.dmg`，Windows 为 `.msi` 或 `.exe`（Windows 包由 CI 自动构建）。
 
 装好后可以直接用应用内的更新：**管理应用 → 设置 → 更新 → 检查更新**。更新包带签名校验，认准官方 Release。
 

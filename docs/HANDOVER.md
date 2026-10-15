@@ -81,7 +81,18 @@
   公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。重新生成用
   `npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
 - 发版：`pnpm publish-update [patch|minor|major]`（升版本 + 构建 + 组 update.json + 上 GitHub）。
-  需要 `GITHUB_TOKEN`（classic PAT，勾 repo）自动上传；没设 token 会准备好文件并打印手动步骤
+  需要 `GITHUB_TOKEN`（classic PAT，勾 repo）自动上传；没设 token 会准备好文件并打印手动步骤。
+  token 也可以放仓库根的 `.env`（已 gitignore），脚本自动加载，不用每次 export。
+  `--skip-build` 可以跳过构建只传产物（发版中途失败重跑时省两分钟）
+- **Windows 安装包走 CI**（Tauri 不做跨平台打包，`.msi`/`.exe` 只能在 Windows 上编）：
+  1. GitHub Actions 的 `build-windows`（`.github/workflows/windows.yml`）在 windows-latest
+     上编译，用 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` **关掉 updater 产物**
+     —— 构建带 updater 产物时强制要求私钥，CI 里没有密钥会直接失败
+  2. 下载 Actions artifact 里的 `.exe`/`.msi`，放进 `release-in/windows/`
+  3. `pnpm publish-update`：脚本把 exe 压成 zip、用本地私钥签名、写进 update.json 的
+     `windows-x86_64` 条目并上传 —— **私钥不出本机**是刻意设计
+  - Windows 更新产物必须是 **zip**（装着 nsis 安装器），不是裸 exe
+  - update.json 的平台键是 `OS-ARCH` 格式：Windows 是 `windows-x86_64`（**没有** `-msvc` 后缀）
 - 客户端：管理应用 → 设置 → 更新。手动「检查更新」→ 下载安装 → 重启
 - **dmg 打包偶发失败**：`bundle_dmg.sh` 中途崩掉时会把临时镜像
   （`target/release/bundle/macos/rw.*.dmg`）留在挂载状态，下一次构建直接挂。

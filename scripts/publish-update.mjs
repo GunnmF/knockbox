@@ -70,22 +70,65 @@ const signature = readFileSync(join(bundleDir, sig), 'utf8').trim()
 const assetName = `Knockbox_${version}_aarch64.app.tar.gz`
 const dmgLocal = join(homedir(), 'Desktop', `Knockbox_${version}_aarch64.dmg`)
 
-// —— 3. 组 update.json（updater 客户端只读这个）——
-const updateJson = {
-  version,
-  notes: '',
-  pub_date: new Date().toISOString(),
-  platforms: {
-    'darwin-aarch64': {
-      signature,
-      url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${assetName}`,
-    },
-  },
-}
-
 const outDir = join(root, 'release-out', tag)
 mkdirSync(outDir, { recursive: true })
 copyFileSync(join(bundleDir, tgz), join(outDir, assetName))
+
+// —— 3. Windows：CI 编好的安装器（.exe/.msi）放在 release-in/windows/，
+// 这里负责压缩 + 本地签名 —— 私钥不出本机，所以这步只能在本地做。
+const windowsDir = join(root, 'release-in', 'windows')
+const platforms = {
+  'darwin-aarch64': {
+    signature,
+    url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${assetName}`,
+  },
+}
+const extraAssets = []
+if (existsSync(windowsDir)) {
+  const winFiles = readdirSync(windowsDir).filter((f) => /\.(exe|msi)$/i.test(f))
+  const nsisExe = winFiles.find((f) => f.toLowerCase().endsWith('.exe'))
+  const msi = winFiles.find((f) => f.toLowerCase().endsWith('.msi'))
+  const keyPath =
+    process.env.TAURI_SIGNING_PRIVATE_KEY ?? join(homedir(), '.tauri', 'knockbox.key')
+
+  if (nsisExe) {
+    // Windows 端的更新产物是 **zip**（装 nsis 装器），不是裸 exe
+    const zipName = nsisExe.replace(/\.exe$/i, '.zip')
+    const zipPath = join(outDir, zipName)
+    execFileSync('zip', ['-j', '-q', '-FS', zipPath, join(windowsDir, nsisExe)])
+    // --app-version 把版本号写进签名的受保护部分，客户端据此拒绝
+    // "新版本号配旧包" 那种偷换（配合配置里的 requireSignedVersion）
+    execFileSync(
+      'npx',
+      [
+        'tauri',
+        'signer',
+        'sign',
+        '--app-version',
+        version,
+        '-f',
+        keyPath,
+        zipPath,
+      ],
+      { cwd: root, stdio: 'inherit', env: { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' } },
+    )
+    platforms['windows-x86_64'] = {
+      signature: readFileSync(`${zipPath}.sig`, 'utf8').trim(),
+      url: `https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${zipName}`,
+    }
+    extraAssets.push(zipName)
+    console.log(`  Windows 更新包：${zipName}`)
+  }
+  if (msi) {
+    copyFileSync(join(windowsDir, msi), join(outDir, msi))
+    extraAssets.push(msi)
+  }
+} else {
+  console.log('  release-in/windows/ 里没有安装器，本次只发 macOS 更新')
+}
+
+// —— 4. 组 update.json（updater 客户端只读这个）——
+const updateJson = { version, notes: '', pub_date: new Date().toISOString(), platforms }
 writeFileSync(join(outDir, 'update.json'), JSON.stringify(updateJson, null, 2) + '\n')
 console.log(`\n  产物已准备好：${outDir}/`)
 
@@ -145,10 +188,12 @@ try {
 }
 
 const uploadBase = release.upload_url.split('{')[0]
-for (const [file, type] of [
+const toUpload = [
   [assetName, 'application/gzip'],
+  ...extraAssets.map((f) => [f, 'application/octet-stream']),
   ['update.json', 'application/json'],
-]) {
+]
+for (const [file, type] of toUpload) {
   const name = encodeURIComponent(file)
   // 同名 asset 已存在会先 422，删掉重传
   try {

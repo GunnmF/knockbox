@@ -1,0 +1,51 @@
+name: build-windows
+
+# Windows 安装包必须在 Windows 上编译（Tauri 不做跨平台打包）。
+# 这里只负责**编译**：私钥不进 CI，产物以 Actions artifact 形式传回，
+# 本地跑 pnpm publish-update 时再签名并上传到 Release。
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建安装包（不产出 updater 签名产物 —— 私钥不出 CI）
+        # createUpdaterArtifacts 默认开着，且构建时强制要求私钥；
+        # CI 里没有密钥，必须显式关掉，安装包照常产出
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+      - name: 提示下一步
+        run: echo "下载本 artifact 里的 exe/msi，放到仓库的 release-in/windows/，再跑 pnpm publish-update 签名并发布"
