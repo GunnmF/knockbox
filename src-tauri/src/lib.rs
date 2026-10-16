@@ -27,7 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
-                let _ = win.center();
+                position_main_window(&win);
                 let _ = win.set_focus();
             }
         }))
@@ -139,7 +139,7 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = event {
                 if let Some(win) = app_handle.get_webview_window("main") {
                     let _ = win.show();
-                    let _ = win.center();
+                    position_main_window(&win);
                     let _ = win.set_focus();
                 }
             }
@@ -148,6 +148,52 @@ pub fn run() {
             let _ = event;
             let _ = app_handle;
         });
+}
+
+/// 顶部留白占屏幕高度的比例。剩下的高度留给往下展开的结果列表。
+const TOP_MARGIN_RATIO: f64 = 0.12;
+
+/// 算主窗口该摆在哪（纯函数，方便单测）。
+///
+/// 输入输出都是**物理**像素，算完再除以 scale 变成逻辑坐标。必须这么算：
+/// 跨不同缩放的屏幕时直接拿物理像素当逻辑坐标用，位置会偏掉一整个缩放倍数。
+fn main_window_position(
+    monitor_pos: (f64, f64),
+    monitor_size: (f64, f64),
+    win_size: (f64, f64),
+    scale: f64,
+) -> tauri::LogicalPosition<f64> {
+    let (mx, my) = monitor_pos;
+    let (mw, mh) = monitor_size;
+    let (ww, wh) = win_size;
+
+    // 窗口比屏幕还高时（矮屏 + 管理页 600px）贴顶，(mh - wh) 已是负数，
+    // 乘完必须夹住，否则会算出屏幕上方的一个位置
+    let x = mx + (mw - ww) / 2.0;
+    let y = my + ((mh - wh) * TOP_MARGIN_RATIO).max(0.0);
+    tauri::LogicalPosition::new(x / scale, y / scale)
+}
+
+/// 把主窗口摆到「水平居中、垂直靠上」的位置。
+///
+/// 为什么不用 `center()`：启动器是随手唤起、随手关掉的工具，垂直居中时
+/// 输入框正对屏幕中央，而结果列表是从它**往下**展开的 —— 列表一多就顶到
+/// 屏幕下沿，看起来像被裁掉一块，管理页固定 600px 高时尤其明显。抬到
+/// 屏幕上部之后，输入框和它下面展开的内容都留在视线里。
+///
+/// 每次唤起都重算：换显示器、拔外接屏之后位置仍然对。
+fn position_main_window(win: &tauri::WebviewWindow) {
+    let Ok(scale) = win.scale_factor() else { return };
+    let Ok(Some(monitor)) = win.current_monitor() else { return };
+    let Ok(win_size) = win.outer_size() else { return };
+
+    let pos = main_window_position(
+        (monitor.position().x as f64, monitor.position().y as f64),
+        (monitor.size().width as f64, monitor.size().height as f64),
+        (win_size.width as f64, win_size.height as f64),
+        scale,
+    );
+    let _ = win.set_position(pos);
 }
 
 /// 快捷键唤起 / 收起主窗口。
@@ -160,7 +206,7 @@ fn toggle_window(app: &tauri::AppHandle) {
         let _ = win.hide();
     } else {
         let _ = win.show();
-        let _ = win.center();
+        position_main_window(&win);
         let _ = win.set_focus();
     }
 }
@@ -334,4 +380,37 @@ fn serve_plugin_asset(uri_path: &str) -> tauri::http::Response<Vec<u8>> {
     // 之前这里自己建 Response，把 CORS 头整个绕过去了：文件确实返回了 200，
     // 但浏览器按 CORS 规则把 module 丢弃，于是插件的 import 链在第一环就断了。
     build(StatusCode::OK, mime, bytes)
+}
+#[cfg(test)]
+mod window_position_tests {
+    use super::*;
+
+    /// 1080p 屏幕 + 520px 高的启动器：水平居中，距顶部 12%
+    #[test]
+    fn 水平居中且距顶部百分之十二() {
+        let p = main_window_position((0.0, 0.0), (1920.0, 1080.0), (760.0, 520.0), 1.0);
+        assert_eq!((p.x, p.y), ((1920.0 - 760.0) / 2.0, (1080.0 - 520.0) * 0.12));
+    }
+
+    /// Retina 屏 scale=2：物理像素算完要折回逻辑坐标，否则位置偏一倍
+    #[test]
+    fn 视网膜屏按比例折算() {
+        let p = main_window_position((0.0, 0.0), (2880.0, 1800.0), (1520.0, 1040.0), 2.0);
+        assert_eq!((p.x, p.y), (((2880.0 - 1520.0) / 2.0) / 2.0, ((1800.0 - 1040.0) * 0.12) / 2.0));
+    }
+
+    /// 窗口比屏幕还高（矮屏 + 管理页 600px）：贴顶，不能算出屏幕上方的位置
+    #[test]
+    fn 窗口比屏幕高时贴顶() {
+        let p = main_window_position((0.0, 0.0), (1366.0, 500.0), (760.0, 600.0), 1.0);
+        assert_eq!(p.y, 0.0);
+    }
+
+    /// 副屏在主屏右边时，x 要跟着副屏的起点走，不能贴到主屏上
+    #[test]
+    fn 多显示器用当前屏幕的原点() {
+        let p = main_window_position((1920.0, -200.0), (1920.0, 1080.0), (760.0, 520.0), 1.0);
+        assert_eq!(p.x, 1920.0 + (1920.0 - 760.0) / 2.0);
+        assert_eq!(p.y, -200.0 + (1080.0 - 520.0) * 0.12);
+    }
 }
