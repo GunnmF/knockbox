@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { hideWindow, pluginCall, pluginEntryUrl, pluginMeta } from '../ipc'
+import { hideWindow, pluginCall, pluginEntryUrl, pluginMeta, showWindow } from '../ipc'
 
 /** 插件通过 iframe 发给宿主的请求。协议见 docs/PLUGIN_SPEC.md §6.4。 */
 interface PluginRequest {
@@ -88,6 +88,25 @@ export function usePluginBridge(query: string, onError: (message: string | null)
   // 诊断用：KNOCKBOX_AUTOLAUNCH=<id> 启动即唤起该轻应用
   useEffect(() => {
     const unlisten = listen<string>('kb://autolaunch', (e) => void launch(e.payload))
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [launch])
+
+  // 插件声明的全局快捷键（src-tauri/src/plugins/shortcuts.rs）。
+  //
+  // 宿主负责监听、这里负责分发：
+  //   silent —— 静默执行，主窗口保持隐藏。插件要界面（比如截图覆盖层）自己开，
+  //             就是"按下 Cmd+Shift+S 直接截图，不唤醒主程序再选择"
+  //   panel  —— 唤醒主窗口并打开插件面板
+  useEffect(() => {
+    const unlisten = listen<{ id: string; mode: string }>('kb://hotkey-run', (e) => {
+      if (e.payload.mode === 'panel') {
+        void showWindow()
+      }
+      // silent 模式什么都不显示：launch 只挂载 iframe，插件跑完 kb.close() 即收尾
+      void launch(e.payload.id)
+    })
     return () => {
       unlisten.then((fn) => fn())
     }

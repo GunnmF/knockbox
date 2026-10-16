@@ -1,27 +1,45 @@
 {
   "id": "com.knockbox.screencap",
   "name": "截图",
-  "version": "3.0.0",
+  "version": "3.2.0",
   "description": "Snipaste 式区域截图：拖框选区、标记、放大镜取色、快捷键复制颜色",
   "entry": "index.html",
   "icon": "icon.svg",
   "author": "knockbox",
   "invocation": "direct",
-  "keywords": ["截图", "截屏", "screenshot", "capture", "取色", "标记", "snipaste"],
-  "permissions": ["screen:capture", "shell:open-path"],
+  "keywords": [
+    "截图",
+    "截屏",
+    "screenshot",
+    "capture",
+    "取色",
+    "标记",
+    "snipaste"
+  ],
+  "permissions": [
+    "screen:capture",
+    "shell:open-path",
+    "system:hotkey"
+  ],
   "settings": [
     {
       "key": "defaultMode",
       "label": "默认截图范围",
       "type": "select",
-      "options": ["区域", "全屏"],
+      "options": [
+        "区域",
+        "全屏"
+      ],
       "default": "区域"
     },
     {
       "key": "format",
       "label": "保存格式",
       "type": "select",
-      "options": ["png", "jpg"],
+      "options": [
+        "png",
+        "jpg"
+      ],
       "default": "png"
     },
     {
@@ -40,14 +58,22 @@
       "key": "colorFormat",
       "label": "取色格式",
       "type": "select",
-      "options": ["HEX", "RGB", "HSL"],
+      "options": [
+        "HEX",
+        "RGB",
+        "HSL"
+      ],
       "default": "HEX"
     },
     {
       "key": "copyColorKey",
       "label": "复制颜色快捷键（截图中按下：复制光标处颜色并退出截图）",
       "type": "select",
-      "options": ["C", "X", "B"],
+      "options": [
+        "C",
+        "X",
+        "B"
+      ],
       "default": "C"
     },
     {
@@ -55,6 +81,13 @@
       "label": "全屏截图包含鼠标指针（区域截图不含指针）",
       "type": "boolean",
       "default": false
+    }
+  ],
+  "shortcuts": [
+    {
+      "key": "CmdOrCtrl+Shift+S",
+      "description": "区域截图",
+      "mode": "silent"
     }
   ]
 }

@@ -32,10 +32,15 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(
-            |app, _shortcut, event| {
+            |app, shortcut, event| {
                 // 按下即唤起/收起。event.state() 区分按下与松开，这里只响应按下，
                 // 避免长按快捷键时反复闪烁窗口。
-                if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    return;
+                }
+                // 先问插件快捷键：不是插件的就走主快捷键的唤起/收起。
+                // 同一个 handler 里路由，是因为 global-shortcut 插件只有一个回调
+                if !plugins::shortcuts::dispatch(app, *shortcut) {
                     toggle_window(app);
                 }
             },
@@ -46,6 +51,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(commands::AppCache::default())
         .manage(screenshot::ScreenSession::default())
+        .manage(plugins::shortcuts::PluginHotkeys::default())
         .register_uri_scheme_protocol("knockbox-plugin", |_app, request| {
             serve_plugin_asset(request.uri().path())
         })
@@ -58,6 +64,8 @@ pub fn run() {
             }
             // 内置轻应用要在第一次搜索之前就位，否则用户第一次唤起时搜不到
             plugins::builtin::sync_all(app.handle());
+            // 插件声明的全局快捷键要在内置应用就位之后再注册
+            plugins::shortcuts::resync(app.handle());
             build_tray(app.handle())?;
             warm_cache(app.handle());
 
@@ -101,6 +109,7 @@ pub fn run() {
             commands::search,
             commands::execute,
             commands::hide,
+            commands::show,
             commands::rescan_apps,
             commands::get_settings,
             commands::save_settings,
@@ -182,7 +191,7 @@ fn main_window_position(
 /// 屏幕上部之后，输入框和它下面展开的内容都留在视线里。
 ///
 /// 每次唤起都重算：换显示器、拔外接屏之后位置仍然对。
-fn position_main_window(win: &tauri::WebviewWindow) {
+pub(crate) fn position_main_window(win: &tauri::WebviewWindow) {
     let Ok(scale) = win.scale_factor() else { return };
     let Ok(Some(monitor)) = win.current_monitor() else { return };
     let Ok(win_size) = win.outer_size() else { return };
@@ -223,6 +232,8 @@ fn register_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> {
             if let Some(state) = app.try_state::<commands::Hotkey>() {
                 *state.0.lock().unwrap() = hotkey.to_string();
             }
+            // unregister_all 把插件快捷键也一起删了，重新注册回来
+            plugins::shortcuts::resync(app);
             Ok(())
         }
         Err(e) => {

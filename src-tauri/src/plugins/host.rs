@@ -225,8 +225,10 @@ fn dispatch_inner(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let format = params.get("format").and_then(|v| v.as_str()).unwrap_or("png");
-            if !matches!(mode, "full" | "region") {
-                return Err(PluginError::InvalidParams("mode 只能是 full 或 region".into()));
+            if !matches!(mode, "full" | "region" | "freeze") {
+                return Err(PluginError::InvalidParams(
+                    "mode 只能是 full / region / freeze".into(),
+                ));
             }
             if !matches!(format, "png" | "jpg") {
                 return Err(PluginError::InvalidParams("format 只能是 png 或 jpg".into()));
@@ -236,6 +238,10 @@ fn dispatch_inner(
                 // 会阻塞到用户在覆盖层里完成或取消，结果直接作为返回值。
                 crate::screenshot::run_region_session(app, plugin_id)
                     .map_err(PluginError::Internal)
+            } else if mode == "freeze" {
+                // 只产出一张全屏冻结帧，不带任何 UI —— 选区/标记由插件自己
+                // 在覆盖层（window.openOverlay）里做。宿主只提供"一张干净的屏幕图"。
+                screen_capture_freeze(app).map_err(PluginError::Internal)
             } else {
                 screen_capture_full(with_cursor, format).map_err(PluginError::Internal)
             }
@@ -608,6 +614,25 @@ fn screen_capture_full(with_cursor: bool, format: &str) -> Result<Value, String>
     }
 }
 
+/// 截一张全屏冻结帧，不带任何 UI。给 `window.openOverlay` 的插件当画布用：
+/// 插件拿到这张图自己画选区，宿主对"怎么选区"一无所知。
+/// 跟光标走（多显示器时截光标所在那块），dataUrl 同样有 8MB 上限。
+fn screen_capture_freeze(app: &tauri::AppHandle) -> Result<Value, String> {
+    let display_no = crate::screenshot::pick_monitor(app).map(|(_, n)| n);
+    let path = crate::screenshot::capture_frame(display_no)?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取冻结帧失败: {e}"))?;
+    let mut result = serde_json::Map::new();
+    result.insert("path".into(), Value::String(path.to_string_lossy().to_string()));
+    result.insert("bytes".into(), serde_json::json!(bytes.len()));
+    if bytes.len() <= 8 * 1024 * 1024 {
+        result.insert(
+            "dataUrl".into(),
+            Value::String(format!("data:image/png;base64,{}", crate::screenshot::base64_encode(&bytes))),
+        );
+    }
+    Ok(Value::Object(result))
+}
+
 /// 插件标记完的成品图落盘。只能写进截图目录，文件名由宿主生成 ——
 /// 不给插件任意路径写文件的能力。
 fn screen_save(data_url: &str, tag: &str) -> Result<Value, String> {
@@ -799,6 +824,8 @@ mod tests {
             invocation: Default::default(),
             permissions: vec![],
             web_allowed_domains: vec![],
+            shortcuts: vec![],
+            background: false,
             settings: vec![],
             min_knockbox_version: None,
         };

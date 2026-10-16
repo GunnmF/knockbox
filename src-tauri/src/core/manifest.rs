@@ -35,6 +35,13 @@ pub struct Manifest {
     pub permissions: Vec<String>,
     #[serde(default, rename = "web:allowed-domains")]
     pub web_allowed_domains: Vec<String>,
+    /// 全局快捷键。宿主负责监听（插件声明、宿主注册），按下时按 `mode` 分发。
+    /// 声明了快捷键就必须有 `system:hotkey` 权限（见 validate）。
+    #[serde(default)]
+    pub shortcuts: Vec<ShortcutDef>,
+    /// 要不要常驻后台（持续监听快捷键 / 剪贴板等事件）。需 `app:background` 权限。
+    #[serde(default)]
+    pub background: bool,
     #[serde(default)]
     pub settings: Vec<SettingDef>,
     #[serde(default, rename = "minKnockboxVersion")]
@@ -60,6 +67,26 @@ pub enum Invocation {
     /// 静默执行，不显示任何界面。插件做完应当调用 `kb.close()`；
     /// 需要反馈时调用 `kb.setPanel()`，面板才会出现。
     Direct,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutDef {
+    pub key: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub mode: ShortcutMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShortcutMode {
+    /// 唤醒主窗口并打开插件面板（默认）
+    #[default]
+    Panel,
+    /// 静默执行，不显示主窗口。截图、锁屏这类一步做完的用它
+    Silent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +132,11 @@ pub const KNOWN_PERMISSIONS: &[&str] = &[
     // 所以各自独立成权限而不是塞进 shell:* 里 —— 用户能分别授予/拒绝。
     "system:lock-screen",
     "screen:capture",
+    // 生命周期与监听类能力。都不是默认给的：声明了就必须在安装时逐条向用户确认。
+    "system:hotkey",        // 允许在 manifest 里声明全局快捷键（宿主监听）
+    "system:clipboard-watch", // 允许声明剪贴板触发条件（宿主监听、命中时推送）
+    "window:overlay",       // 允许开全屏覆盖层窗口承载自己的 UI
+    "app:background",       // 允许常驻后台
 ];
 
 /// 读取并校验插件根目录下的 `plugin.json`。
@@ -183,6 +215,39 @@ pub fn validate(m: &Manifest, root: &Path) -> Result<(), String> {
         if s.kind == SettingType::Select && s.options.is_empty() {
             return Err(format!("设置项 \"{}\" 是 select 但没有 options", s.key));
         }
+    }
+
+    // —— shortcuts：声明就必须有 system:hotkey 权限，且不能有裸按键、不能重复 ——
+    if !m.shortcuts.is_empty() && !m.permissions.iter().any(|p| p == "system:hotkey") {
+        return Err("声明了 shortcuts，但 permissions 里没有 system:hotkey".into());
+    }
+    let mut seen_keys = HashSet::new();
+    for s in &m.shortcuts {
+        if s.key.trim().is_empty() {
+            return Err("shortcut 的 key 不能为空".into());
+        }
+        // 必须有修饰键：裸按键（如 "S"）会抢走用户的正常打字。
+        // 主快捷键录制器里就有这条（Settings.tsx::HotkeyRecorder），插件同样适用。
+        let has_modifier = ["CmdOrCtrl", "Ctrl", "Alt", "Shift", "Super", "Meta"]
+            .iter()
+            .any(|m| s.key.contains(m));
+        if !has_modifier {
+            return Err(format!(
+                "shortcut \"{}\" 没有修饰键，裸按键会劫走用户的正常输入",
+                s.key
+            ));
+        }
+        if s.key.chars().count() > 64 {
+            return Err(format!("shortcut \"{}\" 过长", s.key));
+        }
+        if !seen_keys.insert(s.key.to_lowercase()) {
+            return Err(format!("shortcut \"{}\" 在同一个插件里重复了", s.key));
+        }
+    }
+
+    // —— background 必须配套 app:background 权限 ——
+    if m.background && !m.permissions.iter().any(|p| p == "app:background") {
+        return Err("声明了 background: true，但 permissions 里没有 app:background".into());
     }
 
     // —— 最低宿主版本（规范 §2.1 / §10）——
@@ -286,6 +351,83 @@ mod tests {
         assert!(resolve_inside(root, "a/../../etc/passwd").is_none());
         // 绝对路径同样会逃出插件目录
         assert!(resolve_inside(root, "/etc/passwd").is_none());
+    }
+
+    /// 在临时目录里写一份最小可用的 plugin.json，跑完整 validate。
+    /// validate 要查 entry 文件是否真实存在，所以得真的落盘。
+    fn validate_with(entry_json: &str) -> Result<(), String> {
+        // 目录名必须每个测试唯一：同进程的测试是**并行**跑的，
+        // 共用同一个目录会互相把 index.html 删掉 —— 单独跑能过、全量跑挂
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("kb-manifest-test-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), "<html></html>").unwrap();
+        let m: Manifest = serde_json::from_str(entry_json).expect("测试清单本身必须可解析");
+        let result = validate(&m, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    }
+
+    #[test]
+    fn 快捷键必须配套权限() {
+        // 声明了 shortcuts 却没有 system:hotkey 权限 → 拒装
+        let no_perm = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": [],
+            "shortcuts": [{ "key": "CmdOrCtrl+Shift+S" }]
+        }"#;
+        assert!(validate_with(no_perm).is_err());
+
+        // 有权限 → 过
+        let ok = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": ["system:hotkey"],
+            "shortcuts": [{ "key": "CmdOrCtrl+Shift+S" }]
+        }"#;
+        assert!(validate_with(ok).is_ok());
+    }
+
+    #[test]
+    fn 快捷键不能是裸按键() {
+        // 裸按键（没有修饰键）会抢走用户的正常打字，必须拒绝
+        let bare = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": ["system:hotkey"],
+            "shortcuts": [{ "key": "S" }]
+        }"#;
+        assert!(validate_with(bare).is_err());
+    }
+
+    #[test]
+    fn 快捷键在同一插件内不能重复() {
+        let dup = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": ["system:hotkey"],
+            "shortcuts": [
+                { "key": "CmdOrCtrl+Shift+S" },
+                { "key": "CmdOrCtrl+Shift+S" }
+            ]
+        }"#;
+        assert!(validate_with(dup).is_err());
+    }
+
+    #[test]
+    fn 后台常驻必须配套权限() {
+        let no_perm = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": [],
+            "background": true
+        }"#;
+        assert!(validate_with(no_perm).is_err());
+
+        let ok = r#"{
+            "id": "com.a.b", "name": "t", "version": "1.0.0", "entry": "index.html",
+            "permissions": ["app:background"],
+            "background": true
+        }"#;
+        assert!(validate_with(ok).is_ok());
     }
 
     /// 内置轻应用随源码走，没有任何安装时校验兜底 —— 清单写错一个拼写

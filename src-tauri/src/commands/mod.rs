@@ -266,6 +266,17 @@ pub fn hide(app: AppHandle) {
     hide_main_window(&app);
 }
 
+/// 显示主窗口。panel 模式的插件快捷键（kb://hotkey-run）由前端调它来唤醒。
+/// 位置走和快捷键唤起同一条规则（水平居中、垂直靠上）。
+#[tauri::command]
+pub fn show(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        crate::position_main_window(&win);
+        let _ = win.set_focus();
+    }
+}
+
 fn hide_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
@@ -379,34 +390,51 @@ pub fn plugin_list() -> Vec<plugin_store::InstalledPlugin> {
     plugin_store::list()
 }
 
-#[tauri::command]
-pub fn plugin_install_dir(path: String) -> Result<source::InstallResult, String> {
-    source::install_from_dir(std::path::Path::new(&path))
+/// 插件增删启停后重注册快捷键：插件声明的快捷键要跟着它的生命周期走
+fn refresh_shortcuts(app: &tauri::AppHandle) {
+    crate::plugins::shortcuts::resync(app);
 }
 
 #[tauri::command]
-pub fn plugin_install_zip(path: String) -> Result<source::InstallResult, String> {
-    source::install_from_zip(std::path::Path::new(&path))
+pub fn plugin_install_dir(app: tauri::AppHandle, path: String) -> Result<source::InstallResult, String> {
+    let r = source::install_from_dir(std::path::Path::new(&path))?;
+    refresh_shortcuts(&app);
+    Ok(r)
 }
 
 #[tauri::command]
-pub fn plugin_install_git(url: String) -> Result<source::InstallResult, String> {
-    source::install_from_git(&url)
+pub fn plugin_install_zip(app: tauri::AppHandle, path: String) -> Result<source::InstallResult, String> {
+    let r = source::install_from_zip(std::path::Path::new(&path))?;
+    refresh_shortcuts(&app);
+    Ok(r)
 }
 
 #[tauri::command]
-pub fn plugin_install_registry(url: String, id: String) -> Result<source::InstallResult, String> {
-    source::install_from_registry(&url, &id)
+pub fn plugin_install_git(app: tauri::AppHandle, url: String) -> Result<source::InstallResult, String> {
+    let r = source::install_from_git(&url)?;
+    refresh_shortcuts(&app);
+    Ok(r)
 }
 
 #[tauri::command]
-pub fn plugin_uninstall(args: IdArg) -> Result<(), String> {
-    plugin_store::uninstall(&args.id)
+pub fn plugin_install_registry(app: tauri::AppHandle, url: String, id: String) -> Result<source::InstallResult, String> {
+    let r = source::install_from_registry(&url, &id)?;
+    refresh_shortcuts(&app);
+    Ok(r)
 }
 
 #[tauri::command]
-pub fn plugin_set_enabled(args: EnableArg) -> Result<(), String> {
-    plugin_store::set_enabled(&args.id, args.enabled)
+pub fn plugin_uninstall(app: tauri::AppHandle, args: IdArg) -> Result<(), String> {
+    plugin_store::uninstall(&args.id)?;
+    refresh_shortcuts(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_set_enabled(app: tauri::AppHandle, args: EnableArg) -> Result<(), String> {
+    plugin_store::set_enabled(&args.id, args.enabled)?;
+    refresh_shortcuts(&app);
+    Ok(())
 }
 
 /// 钉住/取消钉住。钉住的轻应用才会出现在启动器搜索结果里。

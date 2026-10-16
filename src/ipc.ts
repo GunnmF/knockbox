@@ -103,6 +103,9 @@ export class PluginCallError extends Error {
 export const search = (query: string) => invoke<ResultItem[]>('search', { query })
 export const execute = (item: ResultItem) => invoke<void>('execute', { item })
 export const hideWindow = () => invoke<void>('hide')
+
+/** 显示主窗口。panel 模式的插件快捷键（kb://hotkey-run）用它唤醒。 */
+export const showWindow = () => invoke<void>('show')
 export const rescanApps = () => invoke<number>('rescan_apps')
 export const getSettings = () => invoke<GlobalSettings>('get_settings')
 export const saveSettings = (settings: GlobalSettings) => invoke<void>('save_settings', { settings })

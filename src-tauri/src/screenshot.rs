@@ -204,7 +204,7 @@ fn notify_error(app: &AppHandle, message: &str) {
 /// 序号用于 `screencapture -D`（CG 显示列表顺序，与 NSScreen 顺序一致）。
 /// 找不到光标位置时退回主屏（序号 1）。
 #[cfg(target_os = "macos")]
-fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
+pub(crate) fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
     let monitors = app.available_monitors().ok()?;
     if monitors.is_empty() {
         return None;
@@ -231,7 +231,7 @@ fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
 /// Windows 的捕获只支持主屏（PowerShell CopyFromScreen 按 PrimaryScreen 取），
 /// 所以覆盖层也必须开主屏，不然画面和窗口对不上。
 #[cfg(not(target_os = "macos"))]
-fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
+pub(crate) fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
     app.primary_monitor().ok()?.map(|m| (m, 1))
 }
 
@@ -492,7 +492,7 @@ pub fn copy_color(app: &AppHandle, text: &str) -> Result<(), String> {
 // 冻结帧捕获
 // ————————————————————————————————————————————————
 
-fn capture_frame(display_no: Option<usize>) -> Result<PathBuf, String> {
+pub(crate) fn capture_frame(display_no: Option<usize>) -> Result<PathBuf, String> {
     let path = frames_dir()?.join(format!("frame-{}.png", now_millis()));
 
     // 诊断开关：跳过 screencapture 用一张假图当冻结帧。
