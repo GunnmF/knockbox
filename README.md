@@ -64,8 +64,9 @@ git push origin master                # ← 这一推，GitHub Actions 自动接
 创建对应的 tag，再生成应用内更新用的 `update.json`。不用手动打 tag，
 也不用点 Actions 页面上任何按钮。
 
-想先在本机试用再发，用不带参数的 `pnpm release`（升版本 + 本机编译，产物拷到桌面）。
-`pnpm release minor` / `major` 升次版本 / 主版本。
+想先在本机试用再发，用不带参数的 `pnpm release`——它**只编译不改版本号**，
+产物拷到桌面。升次版本/主版本：`pnpm release:publish minor` / `major`，
+或直接指定 `pnpm release:publish 0.3.0`。
 
 推 master 但当前版本已经发过时，CI 会自动跳过构建（不会重复花 5 分钟）。
 如果上次发版中途挂了（`update.json` 没生成），再推一次 master 会自动补齐。

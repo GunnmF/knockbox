@@ -7,14 +7,12 @@
  * 这里把它们绑成一个动作，顺带把产物拷到桌面并打印绝对路径。
  *
  * 用法：
- *   pnpm release              # 升补丁号 + 本机编译，产物拷到桌面（自己先试用）
- *   pnpm release minor        # 升次版本  0.1.1 -> 0.2.0
- *   pnpm release major        # 升主版本  0.2.0 -> 1.0.0
- *   pnpm release patch 0.3.0  # 直接指定版本号
- *   pnpm release --no-build   # 只升版本号，不编译
  *   pnpm release:publish      # **发版就这一条**（在 dev 上跑）：升版本 + 提交。
  *                             #   之后合并到 master 并推送，CI 自动编译签名发版
  *   pnpm release:publish --dry-run   # 同上但只预演，不改文件不提交
+ *   pnpm release:publish minor      # 升次版本  0.2.10 -> 0.3.0
+ *   pnpm release:publish 0.3.0       # 直接指定版本号
+ *   pnpm release              # 本机自测构建：**不改版本号**，产物拷到桌面
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, copyFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
@@ -40,7 +38,12 @@ const write = (p, s) => writeFileSync(join(root, p), s)
 }
 
 const argv = process.argv.slice(2)
-const noBuild = argv.includes('--no-build')
+if (argv.includes('--no-build')) {
+  console.error('✗ 没有 --no-build 这个参数了')
+  console.error('  只想升版本不编译 → pnpm release:publish（它本来就不编译）')
+  console.error('  想本机自测构建 → pnpm release（不改版本号）')
+  process.exit(1)
+}
 const publish = argv.includes('--publish')
 // 预演：只说清楚「会做什么」，不改文件、不提交、不推送。
 // 推 tag 会触发 CI 建出公开 Release，值得先看一眼再按
@@ -102,28 +105,31 @@ if (publish) {
   }
 }
 
-// —— 1. 同步三个文件的版本号 ——
-write('package.json', read('package.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
-
-// Cargo.toml 里 package 段和 [lib] 段各有一个键位，只动 [package] 下第一个 version
-const cargo = read('src-tauri/Cargo.toml')
-const pkgStart = cargo.indexOf('[package]')
-const before = cargo.slice(0, pkgStart)
-const after = cargo.slice(pkgStart).replace(/^version = "[^"]+"/m, `version = "${version}"`)
-write('src-tauri/Cargo.toml', before + after)
-
-write('src-tauri/tauri.conf.json', read('src-tauri/tauri.conf.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
-
-console.log(`\n  版本号  ${current}  →  ${version}   (package.json / Cargo.toml / tauri.conf.json)\n`)
-
-const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
-
-// —— 发版：在 dev 上跑，升版本 + 提交，剩下交给 CI ——
-// 为什么不再本机编译、也不打 tag：mac + Windows 两端都在 CI 编
-// （.github/workflows/release.yml 只监听 master 的 push），tag 由 CI 在构建时
-// 创建并指向被编译的那个 commit —— 本地先打 tag 的话，tag 和实际发出去的代码
-// 很容易对不上（master 还会继续往前走）
+// —— 职责划分：只有「发版」才动版本号 ——
+//   pnpm release:publish   升版本 + 提交（在 dev 上跑）
+//   pnpm release           **只本机编译**，版本号原样不动（自己先试用）
+// 早先两个命令都会升版本，连着跑会把版本升两次（0.2.10 → 0.2.11 → 0.2.12），
+// 而多出来的那次构建纯属白等几分钟 —— CI 那边两端都会重新编。
 if (publish) {
+  // —— 1. 同步三个文件的版本号 ——
+  write('package.json', read('package.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
+
+  // Cargo.toml 里 package 段和 [lib] 段各有一个键位，只动 [package] 下第一个 version
+  const cargo = read('src-tauri/Cargo.toml')
+  const pkgStart = cargo.indexOf('[package]')
+  const before = cargo.slice(0, pkgStart)
+  const after = cargo.slice(pkgStart).replace(/^version = "[^"]+"/m, `version = "${version}"`)
+  write('src-tauri/Cargo.toml', before + after)
+
+  write('src-tauri/tauri.conf.json', read('src-tauri/tauri.conf.json').replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
+
+  console.log(`\n  版本号  ${current}  →  ${version}   (package.json / Cargo.toml / tauri.conf.json)\n`)
+
+  const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
+
+  // 剩下的交给 CI：mac + Windows 两端都在 CI 编（.github/workflows/release.yml
+  // 只监听 master 的 push），tag 也由 CI 在构建时创建并指向被编译的那个 commit ——
+  // 本地先打 tag 的话，tag 和实际发出去的代码很容易对不上（master 还会继续往前走）
   // SDK 要跟着这次提交走：轻应用目录里的 sdk.js 是提交物
   syncSdk()
 
@@ -134,14 +140,11 @@ if (publish) {
   console.log('    接下来合并到 master 并推送，CI 会自动编译、签名、上传、发 tag：')
   console.log('      git switch master && git merge dev && git push origin master')
   console.log('    进度看 https://github.com/GunnmF/knockbox/actions\n')
-  console.log('    想先在本机试用再发，跑不带 --publish 的 pnpm release。\n')
+  console.log('    想先在本机试用再发：pnpm release（只编译，不动版本号）\n')
   process.exit(0)
 }
 
-if (noBuild) {
-  console.log('  --no-build：只升了版本号，没有编译。\n')
-  process.exit(0)
-}
+console.log(`\n  本机自测构建 v${current}（不改版本号）\n`)
 
 // —— 2. 把 SDK 同步进各个轻应用 ——
 /**
