@@ -360,6 +360,10 @@ cargo check && cargo test             # 10/10 通过
 | 20 | `walkdir`/`zip`/`sha2` 被放进 macOS 专属依赖段 | **Windows 编译直接失败**（E0432/E0433 找不到 crate），三个都是全平台都在用的（文件遍历兜底 / 解包安装插件 / 完整性校验）—— 依赖分组错了，与业务逻辑无关 |
 | 21 | 上传步骤写 `$(cd "$B/dmg" && ls *.dmg)` | `cd` 之后只剩文件名，`gh` 按工作目录解析找不到文件 → macOS 发布必挂（dmg 本身是正常产出的） |
 | 22 | 按 Tauri **v1** 的印象找 `bundle/nsis/*.zip` 当 Windows 更新产物 | v2 的 Windows 更新包就是安装器 `*.exe`（签名 `*.exe.sig`），没有 zip —— 找不到就抛错；就算真打成 zip，客户端也会因签名对不上拒绝更新。CI 与两个本地兜底脚本都写错了 |
+| 23 | update.json job 靠 `needs.*.outputs` 接收上游的产物名和签名 | 两端构建都成功、产物也传上了，下游拿到的**五个值全是空**，报错却是「缺少 TAG」，完全指不到真正原因。改成脚本自己去 Release 上读资产列表找产物（`ci-publish-update-json.mjs`），传值管道整条消失，还能单独重跑 |
+
+> 23 这条和 21、22 一起说明同一件事：**发版链路上的每一环都要能被单独验证**。
+> 「上传成功」不等于「下游收到了」——这次的教训是没有中间那步的可见性。
 
 > 18–20 三条都是首次双平台 CI 才暴露的，根因是**此前只在 macOS 上编译过**。
 > 已加 `ci.yml`：推 master 就在 mac + Windows 上跑 `tauri build --no-bundle` + `cargo test`，
