@@ -12,8 +12,12 @@
 **宿主不该是轻应用的作者。** 截图和锁屏要搬到独立的商店仓库，装完本体后从
 应用商店安装，宿主只留沙箱 + 能力网关 + 商店。
 
-需求与设计见 **[docs/PLUGIN_ECOSYSTEM.md](PLUGIN_ECOSYSTEM.md)**（含分阶段迁移路径和
-待拍板问题）。本文件 §6「仍未做」里与插件相关的条目，以那一份为准。
+- **商店仓库已建好**：`GunnmF/knockbox-apps`（插件在 `apps/` 下，`index.json` 由
+  `scripts/build-index.mjs` 打包 + 生成，CI 打 `store-v*` tag 即发版）
+- 需求与设计见 **[docs/PLUGIN_ECOSYSTEM.md](PLUGIN_ECOSYSTEM.md)**（含分阶段迁移路径；
+  五个问题已拍板见 §9，核心原则：**宿主负责所有系统级监听，轻应用只声明**）
+- 迁移完成前，本仓库的 `src-tauri/builtins/` **先保留** —— 商店还没上线，
+  删掉内置应用截图就直接没了。切换时刻在 PLUGIN_ECOSYSTEM §8 阶段 3
 
 ---
 
