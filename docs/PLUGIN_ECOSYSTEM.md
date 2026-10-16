@@ -290,11 +290,15 @@ PLUGIN_SPEC §4 要求「安装界面上逐条向用户展示即将授予的能�
 
 ### 阶段 1：宿主补齐能力（不破坏现状）
 
-- 加 `system:hotkey` / `window:overlay` / `app:background` 三个权限与对应 API
-- 加 `screen.capture({mode:'freeze'})`，**不动**现有的 region 分支
-- 实现通用覆盖层窗口（宿主页面只做「渲染插件 iframe」这一件事）
-- `builtin.rs` 保留（内置应用还在），但**改为默认不装**：
-  `plugin.json` 里标 `"builtin": true`，首次启动只登记不安装，管理页里显示「官方内置，点击安装」
+- ✅ 加 `system:hotkey` / `window:overlay` / `app:background` / `system:clipboard-watch` 权限
+- ✅ manifest 支持 `shortcuts`（声明式，宿主监听）+ `background`，含校验与 5 个单测
+- ✅ 快捷键注册表：主快捷键优先、插件间先到先得、跟随插件生命周期增删
+- ✅ `kb://hotkey-run` 分发：`silent` 不唤醒主窗口 / `panel` 唤醒并打开面板
+- ✅ `screen.capture({mode:'freeze'})`：只给一张干净的全屏图，不带 UI
+- ⬜ **通用覆盖层窗口**（`window.openOverlay`）：宿主页面只做「渲染插件 iframe」
+- ⬜ `app:background` 的实际生效（托盘列表 + 设置页标识）
+- ⬜ `system:clipboard-watch` 的触发条件匹配
+- ⬜ 内置应用改为「默认不装，只登记」
 
 **产出**：宿主具备被外部插件驱动截图的全部能力，但没有任何功能因此改变。
 

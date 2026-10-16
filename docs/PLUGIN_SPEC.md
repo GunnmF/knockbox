@@ -66,6 +66,8 @@ my-plugin/
 | `keywords` | string[] | | 唤起关键词。输入框匹配到关键词时，该插件排在结果首位 |
 | `activation` | enum | | `keyword`（默认，输入关键词即接管）/ `manual`（仅用户主动点开） |
 | `invocation` | enum | | `panel`（默认，弹出面板让用户操作）/ `direct`（静默执行，不显示界面） |
+| `shortcuts` | object[] | | 声明全局快捷键，见 §2.3。**声明了就必须有 `system:hotkey` 权限** |
+| `background` | boolean | | 是否需要常驻后台（持续监听事件），见 §2.4。**必须配 `app:background` 权限** |
 | `permissions` | string[] | | 能力白名单，见 §4。**未声明的能力一律不可用** |
 | `settings` | object[] | | 设置项声明，Knockbox 自动生成设置界面，见 §5 |
 | `minKnockboxVersion` | string | | 最低宿主版本，不满足则拒绝安装 |
@@ -82,6 +84,45 @@ my-plugin/
 6. `permissions` 中每一项必须在内核已知的权限表中，未知权限报错而非忽略
 7. 单个插件解压后体积 ≤ 50 MB（软限制，超出仅告警）
 8. 插件目录内不得包含符号链接（阻断指向宿主文件系统的逃逸）
+9. 声明了 `shortcuts` 就必须有 `system:hotkey` 权限；每个快捷键**必须带修饰键**
+   （裸按键会劫走用户的正常打字），同一插件内不允许重复
+10. `background: true` 必须有 `app:background` 权限
+
+---
+
+### 2.3 全局快捷键（shortcuts）
+
+```json
+"shortcuts": [
+  { "key": "CmdOrCtrl+Shift+S", "description": "区域截图", "mode": "silent" }
+]
+```
+
+| 字段 | 说明 |
+|---|---|
+| `key` | 组合键，`CmdOrCtrl` 在 macOS 上是 ⌘、在其它平台是 Ctrl。**必须有修饰键** |
+| `description` | 给人看的说明，显示在设置页的快捷键列表里 |
+| `mode` | `silent`（默认按下即静默执行，主窗口不出现）/ `panel`（唤醒主窗口并打开插件面板） |
+
+**宿主负责监听，插件只声明。** 插件代码里没有任何"注册快捷键"的 API ——
+它在清单里写清楚要什么，宿主去注册系统监听，按下时通知插件。这既是安全边界
+（装一个截图插件不会顺带拿到"监听所有按键"的能力），也解决了组合键冲突：
+主快捷键优先，插件之间先到先得，后注册的那个会被跳过并在设置页里看到提示。
+
+`silent` + `invocation: direct` 的组合就是「一步做完的事」：按下快捷键，
+主窗口始终隐藏，只有插件自己需要的界面（比如全屏覆盖层）会出现，做完即走。
+
+### 2.4 后台常驻（background）
+
+```json
+"background": true
+```
+
+`background: true` 表示这个轻应用需要**持续监听事件**（快捷键之外还有剪贴板
+变化等），必须一直活着；不声明就是"被唤起时才创建页面，用完就回收"。
+
+后台常驻的轻应用必须在界面上让用户看得见：托盘菜单会列出它们，设置页的已安装
+列表也会标注。这条权限单独列出来而不是默认给，是因为"长期占着资源"该由用户决定。
 
 ---
 
@@ -139,6 +180,10 @@ my-plugin/
 | `window:resize` | 调整面板高度（多行输入类插件需要） | 无 |
 | `system:lock-screen` | 锁定屏幕 | 高 —— **不可撤销**。插件必须给用户明确的确认动作，禁止在唤起时直接调用 |
 | `screen:capture` | 截取屏幕，存到本机并返回文件路径 | 高 —— 会拍到屏幕上的密码、聊天记录 |
+| `system:hotkey` | 允许在 `shortcuts` 里声明全局快捷键（**宿主负责监听**） | 高 —— 劫持按键 |
+| `system:clipboard-watch` | 允许声明剪贴板触发条件，命中时宿主把内容推给插件 | 高 —— 复制过的内容 |
+| `window:overlay` | 允许开一个覆盖全屏的置顶窗口承载自己的界面 | 高 —— 全屏遮挡 |
+| `app:background` | 允许常驻后台（持续监听事件） | 中 —— 长期占用资源 |
 
 > `screen:capture` 覆盖两个方法：`screen.capture`（`mode: 'region'` 时宿主会弹
 > 全屏覆盖层让用户框选/标记/取色，这个 Promise 会挂到用户操作结束，取消时
@@ -147,6 +192,12 @@ my-plugin/
 
 > `system:lock-screen` 和 `screen:capture` 是内置轻应用（锁屏、截图）需要的能力。
 > 两者都是高影响操作，因此独立成权限而不是并入 `shell:*` —— 用户能分别授予或拒绝。
+
+> **`mode: 'freeze'`（宿主只给图，界面全归插件）**：`freeze` 截一张全屏画面立刻返回
+> `{ path, bytes, dataUrl? }`，**不带任何界面**。想自己做选区的轻应用用它拿到一张
+> 干净的屏幕图，再配合 `window.openOverlay` 开自己的覆盖层去画 —— `region` 模式是
+> 给"一步就完事"的轻应用用的快捷通道（宿主代画选区），标记、取色、快捷键这些
+> 交互细节一律由插件自己实现。
 
 补充声明字段：
 
@@ -241,6 +292,7 @@ const { text, app } = await kb.system.getSelection()
 await kb.system.lockScreen()
 await kb.screen.capture()                    // 全屏直出，存到本机，立即返回
 await kb.screen.capture({ mode: 'region' })  // 弹出宿主全屏覆盖层，等用户操作完才返回
+await kb.screen.capture({ mode: 'freeze' })  // 只拿一张全屏图，界面自己画（配合 window.openOverlay）
 await kb.screen.save(dataUrl, 'tag')         // 画布上标好的图落盘（只能写进截图目录）
 
 // —— 启动 (shell:*) ——
