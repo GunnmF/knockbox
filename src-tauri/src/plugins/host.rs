@@ -44,6 +44,7 @@ fn requirement_for(method: &str) -> Requirement {
         "history.list" => Requirement::Needs("history:read"),
         "system.lockScreen" => Requirement::Needs("system:lock-screen"),
         "screen.capture" | "screen.save" => Requirement::Needs("screen:capture"),
+        "window.openOverlay" | "window.closeOverlay" => Requirement::Needs("window:overlay"),
         // 纯前端行为：宿主侧无需任何系统能力
         "settings.get" | "settings.open" | "pushResult" | "setPanel" | "close" => {
             Requirement::AlwaysAllowed
@@ -263,6 +264,21 @@ fn dispatch_inner(
                 .take(16)
                 .collect::<String>();
             screen_save(data_url, &tag).map_err(PluginError::Internal)
+        }
+        "window.openOverlay" => {
+            // 插件要一块盖满全屏的画布。宿主只开窗口，界面和交互全归插件 ——
+            // 这是把截图（选区/标记/取色）从宿主搬出去的前提。
+            let entry = params
+                .get("entry")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| PluginError::InvalidParams("缺少 entry（插件内的 html 相对路径）".into()))?;
+            let params = params.get("params").cloned().unwrap_or(Value::Null);
+            crate::screenshot::run_overlay_session(app, plugin_id, entry, params)
+                .map_err(PluginError::Internal)
+        }
+        "window.closeOverlay" => {
+            let payload = params.get("result").cloned().unwrap_or(Value::Null);
+            crate::screenshot::finish_overlay(app, payload).map_err(PluginError::Internal)
         }
         "close" => Ok(Value::Null),
         "notify" => Ok(Value::Null),

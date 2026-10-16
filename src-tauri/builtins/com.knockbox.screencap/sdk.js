@@ -32,6 +32,8 @@ const PERMISSION_MAP = {
     'system.lockScreen': 'system:lock-screen',
     'screen.capture': 'screen:capture',
     'screen.save': 'screen:capture',
+    'window.openOverlay': 'window:overlay',
+    'window.closeOverlay': 'window:overlay',
 };
 /**
  * 连接宿主。返回一个 Proxy，使得**未授权的方法根本不存在**（`undefined`），
@@ -89,6 +91,13 @@ export async function connect() {
                 format: opts?.format ?? 'png',
             }),
             save: (dataUrl, tag) => send('screen.save', { dataUrl, tag }),
+        },
+        window: {
+            openOverlay: (options) => send('window.openOverlay', { entry: options.entry, params: options.params ?? null }),
+            // 不等返回值：覆盖层关掉之后这个窗口就没了，等也等不到
+            closeOverlay: (result) => {
+                void send('window.closeOverlay', { result: result ?? null }).catch(() => { });
+            },
         },
         shell: {
             openUrl: (url) => send('shell.openUrl', { url }),

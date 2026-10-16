@@ -214,3 +214,37 @@
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* ——— 覆盖层：插件模式 ——————————————————————————————— */
+
+/* 插件的页面铺满整块画布。宿主只提供画布，不加任何自己的装饰。 */
+.kb-overlay-frame {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+
+/* context/URL 还没就绪时的占位。窗口此时还没显示，正常看不见；
+   万一插件页面加载失败，用户至少看到一行说明而不是纯黑屏。 */
+.kb-overlay-loading,
+.kb-overlay-error {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.82);
+  font: 13px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+  background: rgba(20, 20, 22, 0.92);
+}
+
+.kb-overlay-error-hint {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}

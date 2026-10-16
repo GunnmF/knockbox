@@ -79,6 +79,8 @@ const PERMISSION_MAP = {
   'system.lockScreen': 'system:lock-screen',
   'screen.capture': 'screen:capture',
   'screen.save': 'screen:capture',
+  'window.openOverlay': 'window:overlay',
+  'window.closeOverlay': 'window:overlay',
 } as const
 
 export interface Knockbox {
@@ -123,7 +125,12 @@ export interface Knockbox {
      * 超过 8MB 的图不带 `dataUrl`。用户取消时 Promise 以「已取消截图」reject。
      */
     capture(opts?: {
-      mode?: 'full' | 'region'
+      /**
+       * `full` 整屏直出（默认）；`region` 用宿主那套现成的选区界面；
+       * `freeze` 只给你一张全屏图、不带任何界面 —— 想自己做选区的插件
+       * 用它，配合 `window.openOverlay` 开自己的覆盖层去画。
+       */
+      mode?: 'full' | 'region' | 'freeze'
       cursor?: boolean
       format?: 'png' | 'jpg'
     }): Promise<{ path?: string; bytes?: number; copied?: boolean; dataUrl?: string }>
@@ -131,6 +138,26 @@ export interface Knockbox {
      * 把画布上标记好的图落盘。只能写进宿主的截图目录，文件名由宿主生成。
      */
     save(dataUrl: string, tag?: string): Promise<{ path: string; bytes: number }>
+  }
+  readonly window: {
+    /**
+     * 开一块盖满当前屏幕的无边框置顶窗口，把**你自己的页面**装进去。
+     * 需声明 `window:overlay` 权限。
+     *
+     * 宿主只提供画布：选区、标记、取色、快捷键全由你的页面实现
+     * （拿底图用 `screen.capture({ mode: 'freeze' })`）。
+     *
+     * 这个 Promise 会挂到你关掉覆盖层为止：`window.closeOverlay({result})`
+     * 里的 `result` 就是它的返回值；用户直接按 Esc 关掉时返回 null。
+     */
+    openOverlay<T = unknown>(options: {
+      /** 插件目录内的相对路径，如 'overlay.html' */
+      entry: string
+      /** 传给你自己的参数，握手时一起拿到（见 onOverlayParams） */
+      params?: unknown
+    }): Promise<T | null>
+    /** 关掉覆盖层并把结果交回 await openOverlay 的那次调用 */
+    closeOverlay<T = unknown>(result?: T): void
   }
   readonly shell: {
     openUrl(url: string): Promise<void>
@@ -212,6 +239,14 @@ export async function connect(): Promise<Knockbox> {
         }),
       save: (dataUrl: string, tag?: string) =>
         send<{ path: string; bytes: number }>('screen.save', { dataUrl, tag }),
+    },
+    window: {
+      openOverlay: <T,>(options: { entry: string; params?: unknown }) =>
+        send<T | null>('window.openOverlay', { entry: options.entry, params: options.params ?? null }),
+      // 不等返回值：覆盖层关掉之后这个窗口就没了，等也等不到
+      closeOverlay: <T,>(result?: T) => {
+        void send<void>('window.closeOverlay', { result: result ?? null }).catch(() => {})
+      },
     },
     shell: {
       openUrl: (url: string) => send<void>('shell.openUrl', { url }),

@@ -500,6 +500,29 @@ pub fn plugin_entry_url(id: String) -> Result<String, String> {
     ))
 }
 
+/// 插件目录里任意文件的可加载 URL。
+///
+/// 覆盖层要装的是插件自己的页面（`window.openOverlay` 传的 entry），不一定是
+/// 清单里的那个 entry，所以不能复用 `plugin_entry_url`。路径仍然要在插件目录内。
+#[tauri::command]
+pub fn plugin_asset_url(id: String, relative: String) -> Result<String, String> {
+    let rel = relative.replace('\\', "/");
+    if rel.starts_with('/') || rel.split('/').any(|s| s == ".." || s == ".") {
+        return Err(format!("路径 \"{relative}\" 不是合法的插件内相对路径"));
+    }
+    let file = plugin_store::plugin_dir(&id).join(&rel);
+    if !file.is_file() {
+        return Err(format!("插件文件不存在: {relative}"));
+    }
+    // scheme 的平台差异见 plugin_entry_url 的注释（Windows 上自定义 scheme 不可用）
+    let base = if cfg!(windows) {
+        "http://knockbox-plugin.localhost"
+    } else {
+        "knockbox-plugin://localhost"
+    };
+    Ok(format!("{base}/{id}/{rel}"))
+}
+
 /// 插件清单里 `settings` 的声明，供前端自动生成设置界面。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -559,6 +582,27 @@ pub fn plugin_save_setting_values(id: String, values: serde_json::Value) -> Resu
 #[tauri::command]
 pub fn screenshot_begin(app: AppHandle) -> Result<serde_json::Value, String> {
     crate::screenshot::begin(&app)
+}
+
+/// 覆盖层页面启动时问一次：这次窗口里该装谁的界面。
+/// 截图模式返回 `{mode:'region'}`；插件自己的覆盖层返回
+/// `{mode:'plugin', pluginId, entry, params}`。
+#[tauri::command]
+pub fn overlay_context(app: AppHandle) -> Result<serde_json::Value, String> {
+    crate::screenshot::context(&app)
+}
+
+/// 覆盖层页面渲染完了，显示窗口。插件模式靠它避免闪一帧空窗。
+#[tauri::command]
+pub fn overlay_ready(app: AppHandle) {
+    crate::screenshot::ready(&app);
+}
+
+/// 插件在覆盖层里做完事调用：带上结果、关掉窗口、唤醒 await openOverlay 的那次调用。
+#[tauri::command]
+pub fn overlay_finish(app: AppHandle, result: Option<serde_json::Value>) -> Result<(), String> {
+    crate::screenshot::finish_overlay(&app, result.unwrap_or(serde_json::Value::Null))?;
+    Ok(())
 }
 
 /// 完成截图：保存文件和/或复制到剪贴板，随后结束会话。

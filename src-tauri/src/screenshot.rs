@@ -1,17 +1,20 @@
-//! Snipaste 式截图会话：冻结帧 + 全屏覆盖层。
-//!
-//! 为什么不继续用 `screencapture -i`（系统自带选区界面）：它只给一个框，
-//! 标记、放大镜取色、快捷键复制颜色都无从谈起 —— 而这些正是截图工具的
-//! 日常高频动作。所以这里自绘覆盖层：
+//! 全屏覆盖层宿主：截图会话 + 插件自己的覆盖层，两者共用一个窗口和一个会话状态。
 //!
 //! 1. `run_region_session`（插件 `screen.capture` 的 region 分支）：
 //!    藏主窗口 → 截全屏冻结帧到临时文件 → 建无边框置顶覆盖窗口
 //!    （`index.html?overlay=1`，宿主自己的页面，不在插件沙箱里）→
 //!    阻塞等覆盖层通过 mpsc 回结果 → 把结果作为插件调用的返回值。
-//! 2. 覆盖层页面通过 `screenshot_begin / finish / cancel / copy_color`
-//!    四个命令与这里通信。页面是宿主自己的代码，不走插件权限网关。
+//! 2. `run_overlay_session`（插件 `window.openOverlay`）：
+//!    同样的窗口，但窗口里装的是**插件自己的页面**（`?overlay=1&plugin=<id>&entry=<e>`）。
+//!    宿主只提供"一块盖满全屏的画布"，选区、标记、快捷键全由插件实现 ——
+//!    这是把截图从宿主里搬出去的前提（见 docs/PLUGIN_ECOSYSTEM.md §6）。
 //!
-//! 会话全程单例：同一时刻只允许一个截图会话，重复唤起直接拒绝。
+//! 覆盖层页面通过 `screenshot_begin / finish / cancel / copy_color`
+//! （截图模式）或 `overlay_context / overlay_finish`（插件模式）与这里通信。
+//! 页面是宿主自己的代码，不走插件权限网关；插件的页面仍然活在它自己的
+//! opaque origin iframe 里。
+//!
+//! 会话全程单例：同一时刻只允许一个覆盖层会话，重复唤起直接拒绝。
 //! 任何一条出路（完成/取消/窗口被销毁）都必须往 `reply` 发一次结果，
 //! 否则 `plugin_call` 的阻塞线程会永远挂住 —— 加新出口时先看这条。
 
@@ -35,13 +38,28 @@ pub const OVERLAY_LABEL: &str = "screencap-overlay";
 /// 传给插件的最终结果超过这个体积就不带 dataUrl（与 host.rs 既有约定一致）。
 const MAX_INLINE_BYTES: usize = 8 * 1024 * 1024;
 
-/// 进行中的截图会话。`reply` 一拿就走（`Option` + take），
+/// 这次覆盖层是谁的界面。
+#[derive(Debug, Clone)]
+pub enum SessionKind {
+    /// 截图：宿主代画选区/标记/取色，冻结帧由宿主截好并交给页面
+    Region,
+    /// 插件自己的覆盖层：宿主只给一块全屏画布，界面和交互全归插件
+    Plugin {
+        /// 插件目录下的入口（相对路径），如 "overlay.html"
+        entry: String,
+        /// 插件在 openOverlay 时带过来的参数，begin 时原样回传
+        params: Value,
+    },
+}
+
+/// 进行中的覆盖层会话。`reply` 一拿就走（`Option` + take），
 /// 保证"恰好回复一次"由类型系统兜底。
 pub struct PendingSession {
     pub plugin_id: String,
-    /// 冻结帧临时文件，begin 读一次，会话结束时删
-    pub frame_png: PathBuf,
-    /// 覆盖层页面是否已调过 begin。页面加载失败时它永远不来，
+    pub kind: SessionKind,
+    /// 冻结帧临时文件（只有 Region 模式有），begin 读一次，会话结束时删
+    pub frame_png: Option<PathBuf>,
+    /// 覆盖层页面是否已调过 begin/context。页面加载失败时它永远不来，
     /// 看门狗就靠这个区分"用户在慢慢标注"和"页面根本没起来"
     pub begun: bool,
     pub reply: Option<mpsc::Sender<Result<Value, String>>>,
@@ -118,12 +136,13 @@ pub fn run_region_session(app: &AppHandle, plugin_id: &str) -> Result<Value, Str
     let (tx, rx) = mpsc::channel();
     *app.state::<ScreenSession>().0.lock().unwrap() = Some(PendingSession {
         plugin_id: plugin_id.to_string(),
-        frame_png: frame.clone(),
+        kind: SessionKind::Region,
+        frame_png: Some(frame.clone()),
         begun: false,
         reply: Some(tx),
     });
 
-    if let Err(e) = open_overlay_window(app, monitor.as_ref().map(|(m, _)| m)) {
+    if let Err(e) = open_overlay_window(app, monitor.as_ref().map(|(m, _)| m), "index.html?overlay=1") {
         // 建窗口失败：把会话撤掉，别让下一次截图永远被拒
         trace!("创建覆盖层窗口失败: {e}");
         let _ = ScreenSession::take(app);
@@ -149,8 +168,94 @@ pub fn run_region_session(app: &AppHandle, plugin_id: &str) -> Result<Value, Str
     outcome
 }
 
-/// begin 看门狗：覆盖层页面加载失败时 begin 永远不会来，插件线程不能永久挂住。
-/// 30 秒内没等到 begin 就按失败结束会话，并当面告诉用户 ——
+/// 插件自己的覆盖层（`window.openOverlay` 的入口）。
+///
+/// 宿主在这里只做一件事：**开一个盖满当前屏幕的无边框置顶窗口，把插件的页面
+/// 装进去**。选区、标记、取色、快捷键全由插件实现 —— 宿主对"怎么选区"一无所知，
+/// 将来截图从宿主里搬出去就靠这条路。
+///
+/// 和截图会话的差别：不截冻结帧（插件自己调 `screen.capture({mode:'freeze'})`）、
+/// 不藏主窗口（silent 模式下主窗口本来就是隐藏的；panel 模式下它该留在
+/// 覆盖层后面，用户关掉覆盖层还能看到）。
+///
+/// 返回值是插件在 `window.closeOverlay({result}) 里带回来的东西；窗口被直接
+/// 销毁（Esc、崩溃）时返回 Null —— 对插件来说"没结果"是正常路径，不是错误。
+pub fn run_overlay_session(
+    app: &AppHandle,
+    plugin_id: &str,
+    entry: &str,
+    params: Value,
+) -> Result<Value, String> {
+    if ScreenSession::is_active(app) {
+        return Err("已有覆盖层会话进行中".into());
+    }
+    // entry 是插件给的相对路径，这里再拦一次：必须是插件目录内的普通 html 相对路径。
+    // 插件本来就没有任意路径的能力，但这条路径会变成覆盖层窗口的 URL，
+    // 一旦能写 ../ 就等于让它加载宿主自己的文件。
+    if entry.trim().is_empty()
+        || entry.starts_with('/')
+        || entry.contains('\\')
+        || entry.split('/').any(|seg| seg == ".." || seg == ".")
+    {
+        return Err(format!("entry \"{entry}\" 不是合法的插件内相对路径"));
+    }
+    if !entry.to_ascii_lowercase().ends_with(".html") {
+        return Err(format!("entry \"{entry}\" 必须是 .html 文件"));
+    }
+
+    let monitor = pick_monitor(app);
+    let (tx, rx) = mpsc::channel();
+    *app.state::<ScreenSession>().0.lock().unwrap() = Some(PendingSession {
+        plugin_id: plugin_id.to_string(),
+        kind: SessionKind::Plugin {
+            entry: entry.to_string(),
+            params,
+        },
+        frame_png: None,
+        begun: false,
+        reply: Some(tx),
+    });
+
+    // plugin_id 会进 URL。反向域名只有 [a-z0-9.-]，本身安全，
+    // 但仍然过滤掉不该出现的字符 —— URL 是要拼进字符串的
+    let query = format!(
+        "index.html?overlay=1&plugin={}",
+        plugin_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
+            .collect::<String>()
+    );
+    if let Err(e) = open_overlay_window(app, monitor.as_ref().map(|(m, _)| m), &query) {
+        trace!("创建插件覆盖层失败: {e}");
+        let _ = ScreenSession::take(app);
+        return Err(format!("创建覆盖层失败: {e}"));
+    }
+    trace!("插件覆盖层已创建：{plugin_id} / {entry}");
+
+    // 不挂看门狗：插件自己的界面可能有加载动画、可能先请求权限再渲染，
+    // 30 秒没动静不代表它坏了。用窗口销毁兜底就行（cancel_if_active）
+    let outcome = rx
+        .recv()
+        .unwrap_or_else(|_| Err("覆盖层会话异常结束".into()));
+    cleanup_overlay(app);
+    outcome
+}
+
+/// 插件在覆盖层里做完事调用：带上结果，关掉窗口，唤醒 await 它的那次调用。
+pub fn finish_overlay(app: &AppHandle, payload: Value) -> Result<Value, String> {
+    let Some(mut session) = ScreenSession::take(app) else {
+        return Err("没有进行中的覆盖层会话".into());
+    };
+    trace!("插件覆盖层完成，结果 {} 字节", payload.to_string().len());
+    if let Some(reply) = session.reply.take() {
+        let _ = reply.send(Ok(payload));
+    }
+    cleanup_overlay(app);
+    Ok(Value::Null)
+}
+
+/// begin 看门狗：覆盖层页面加载失败时 begin/context 永远不会来，插件线程不能永久挂住。
+/// 30 秒内没等到就按失败结束会话，并当面告诉用户 ——
 /// "点了截图毫无反应"是最难排查的症状。
 fn start_begin_watchdog(app: &AppHandle) {
     let app = app.clone();
@@ -235,7 +340,12 @@ pub(crate) fn pick_monitor(app: &AppHandle) -> Option<(tauri::Monitor, usize)> {
     app.primary_monitor().ok()?.map(|m| (m, 1))
 }
 
-fn open_overlay_window(app: &AppHandle, monitor: Option<&tauri::Monitor>) -> Result<(), String> {
+/// 建覆盖层窗口。`query` 是 index.html 后面的查询串（两种模式共用这一个窗口）。
+fn open_overlay_window(
+    app: &AppHandle,
+    monitor: Option<&tauri::Monitor>,
+    query: &str,
+) -> Result<(), String> {
     // 上一次会话的窗口如果因故还活着，先销毁，同标签复建会直接报错
     if let Some(old) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = old.destroy();
@@ -259,10 +369,12 @@ fn open_overlay_window(app: &AppHandle, monitor: Option<&tauri::Monitor>) -> Res
         });
 
     // KNOCKBOX_PROBE=text：页面加载后自动进入文字输入自测（免点击复现焦点问题）
-    let mut url = "index.html?overlay=1";
-    if std::env::var_os("KNOCKBOX_PROBE").is_some() {
-        url = "index.html?overlay=1&probe=text";
-    }
+    // 只对截图模式有意义（宿主自己的界面），插件模式原样用它给定的 query
+    let url = if std::env::var_os("KNOCKBOX_PROBE").is_some() && !query.contains("plugin=") {
+        "index.html?overlay=1&probe=text".to_string()
+    } else {
+        query.to_string()
+    };
     // mut 只有 macOS 分支（下面重新赋值 builder）用得上，
     // 其他平台会报 "variable does not need to be mutable"
     #[allow(unused_mut)]
@@ -348,7 +460,14 @@ pub fn cancel_if_active(app: &AppHandle) {
     if let Some(mut session) = ScreenSession::take(app) {
         trace!("会话被取消（窗口销毁）");
         if let Some(reply) = session.reply.take() {
-            let _ = reply.send(Err("已取消截图".into()));
+            // 两种模式对"取消"的定义不一样：截图取消是异常（用户没拿到图），
+            // 插件覆盖层取消是正常路径（用户直接按了 Esc，没选东西而已）——
+            // 按错误回会让插件不得不去 catch 一个用户没做错的操作
+            let outcome = match session.kind {
+                SessionKind::Region => Err("已取消截图".into()),
+                SessionKind::Plugin { .. } => Ok(Value::Null),
+            };
+            let _ = reply.send(outcome);
         }
     }
 }
@@ -368,28 +487,69 @@ pub fn begin(app: &AppHandle) -> Result<Value, String> {
             return Err("没有进行中的截图会话".into());
         };
         session.begun = true;
-        (session.plugin_id.clone(), session.frame_png.clone())
+        let Some(frame) = session.frame_png.clone() else {
+            return Err("当前不是截图会话".into());
+        };
+        (session.plugin_id.clone(), frame)
     };
     trace!("begin：页面就绪，显示覆盖层");
 
     let bytes = std::fs::read(&frame).map_err(|e| format!("读取冻结帧失败: {e}"))?;
     let data_url = format!("data:image/png;base64,{}", base64_encode(&bytes));
-
-    if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-        let _ = win.show();
-        let _ = win.set_focus();
-        // 键盘焦点是覆盖层的命门：焦点进不来，文字输入/C 取色/Esc 全死。
-        // 无边框 + 高 level + Accessory 的组合下这个值必须实测。
-        trace!("begin: 覆盖层已显示 is_focused={:?}", win.is_focused().ok());
-    } else {
-        trace!("begin：覆盖层窗口已不存在");
-    }
+    show_overlay(app);
 
     Ok(serde_json::json!({
         "dataUrl": data_url,
         "settings": merged_settings(&plugin_id),
         "saveDir": screenshots_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     }))
+}
+
+/// 覆盖层页面启动时问一次：这次窗口里该装谁。
+///
+/// 页面拿到 mode 决定渲染哪一套：无参数 → 宿主自己的截图界面；
+/// 带 plugin → 渲染那个插件的页面（见 run_overlay_session）。
+pub fn context(app: &AppHandle) -> Result<Value, String> {
+    let out = {
+        let state = app.state::<ScreenSession>();
+        let mut guard = state.0.lock().unwrap();
+        let Some(session) = guard.as_mut() else {
+            return Err("没有进行中的覆盖层会话".into());
+        };
+        session.begun = true;
+        match &session.kind {
+            SessionKind::Region => serde_json::json!({ "mode": "region" }),
+            SessionKind::Plugin { entry, params } => serde_json::json!({
+                "mode": "plugin",
+                "pluginId": session.plugin_id,
+                "entry": entry,
+                "params": params,
+            }),
+        }
+    };
+    // 注意这里**不**显示窗口：context 只回答"该装谁"，什么时候显示由页面决定
+    //（插件模式要先拿到 iframe 的 URL 再显示，否则会闪一帧空窗）。
+    // 页面渲染完调 ready()。
+    Ok(out)
+}
+
+/// 覆盖层页面渲染完了，现在可以显示了。
+pub fn ready(app: &AppHandle) {
+    show_overlay(app);
+}
+
+/// 显示覆盖层窗口。两种模式共用 —— 都在"内容准备好、可以渲染"的这一刻显示，
+/// 避免先闪一个空窗。
+fn show_overlay(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
+        let _ = win.show();
+        let _ = win.set_focus();
+        // 键盘焦点是覆盖层的命门：焦点进不来，文字输入/C 取色/Esc 全死。
+        // 无边框 + 高 level + Accessory 的组合下这个值必须实测。
+        trace!("覆盖层已显示 is_focused={:?}", win.is_focused().ok());
+    } else {
+        trace!("覆盖层窗口已不存在");
+    }
 }
 
 /// 完成：保存图片和/或复制到剪贴板，然后结束会话。

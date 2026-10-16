@@ -164,6 +164,9 @@ export const pluginSetEnabled = (id: string, enabled: boolean) =>
 export const pluginSetPinned = (id: string, pinned: boolean) =>
   invoke<void>('plugin_set_pinned', { args: { id, pinned } })
 export const pluginEntryUrl = (id: string) => invoke<string>('plugin_entry_url', { id })
+/** 插件目录里任意文件的可加载 URL（覆盖层装插件自己的页面时用，不一定是清单 entry） */
+export const pluginAssetUrl = (id: string, relative: string) =>
+  invoke<string>('plugin_asset_url', { id, relative })
 export const pluginMeta = (id: string) => invoke<PluginMeta>('plugin_meta', { id })
 export const pluginSettingValues = (id: string) => invoke<Record<string, unknown>>('plugin_setting_values', { id })
 export const pluginSaveSettingValues = (id: string, values: Record<string, unknown>) =>
@@ -192,6 +195,21 @@ export const screenshotFinish = (args: { saveDataUrl?: string; copyDataUrl?: str
   invoke<ScreenshotFinishResult>('screenshot_finish', args)
 export const screenshotCancel = () => invoke<void>('screenshot_cancel')
 export const screenshotCopyColor = (text: string) => invoke<void>('screenshot_copy_color', { text })
+
+// —— 覆盖层的两种模式（见 src-tauri/src/screenshot.rs）——
+
+/** 覆盖层页面启动时问一次：这次窗口里该装谁的界面 */
+export type OverlayContext =
+  | { mode: 'region' }
+  | { mode: 'plugin'; pluginId: string; entry: string; params: unknown }
+
+export const overlayContext = () => invoke<OverlayContext>('overlay_context')
+
+/** 覆盖层页面渲染完了，宿主这时才显示窗口（避免闪一帧空窗） */
+export const overlayReady = () => invoke<void>('overlay_ready')
+
+/** 插件在覆盖层里做完事：带结果关窗口，唤醒 await openOverlay 的那次调用 */
+export const overlayFinish = (result?: unknown) => invoke<void>('overlay_finish', { result })
 /** 覆盖层前端打点到宿主 stderr（排查真机焦点/IME 问题用） */
 export const overlayLog = (msg: string) => invoke<void>('overlay_log', { msg }).catch(() => {})
 
