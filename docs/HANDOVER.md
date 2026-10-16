@@ -82,9 +82,17 @@
   公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。本地改完记得同步：
   `pbcopy < ~/.tauri/knockbox.key` 粘到 Settings → Secrets and variables → Actions。
   重新生成：`npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
-- **发版只有两步**（`.github/workflows/release.yml`，mac + Windows 都在 CI 里编包并签名）：
-  1. `pnpm release` → 升版本 + 本机自测构建，然后 `git commit -am v0.2.x && git tag v0.2.x && git push --tags`
-  2. 等 Actions 跑完：编包 → 用 Secret 里的私钥签名 → 上传产物 → 生成 update.json，全自动
+- **发版只有一步**（`.github/workflows/release.yml`，mac + Windows 都在 CI 里编包并签名）：
+  ```
+  pnpm release:publish      # 升版本 → 同步 SDK → 提交 → 打 tag → 推送
+  ```
+  之后全程自动：CI 编包 → 用 Secret 里的私钥签名 → 上传产物 → 生成 update.json。
+  推 tag 前可以先 `pnpm release:publish --dry-run` 预演一遍（不改文件不提交不推送）。
+  脚本会先查工作区干不干净、tag 是否已存在，不干净就拒发 —— 免得把无关改动
+  一起打进发布提交。想先在本机试用再发，用不带参数的 `pnpm release`（升版本 +
+  本机编译，产物拷到桌面）
+- **推 master 也会跑 `.github/workflows/ci.yml`**：两端各编译一遍 + 单元测试，
+  用来在打 tag 之前就暴露跨平台编译问题（不要手动触发，它自己会跑）
 - **Actions artifact ≠ Release**：artifact 要登录、90 天过期、updater 读不到；
   客户端要的是 Release 上那个匿名可下的 `update.json`。所以工作流直接传 Release，
   Actions artifact 只在需要人工看的时候用

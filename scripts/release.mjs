@@ -42,6 +42,9 @@ const write = (p, s) => writeFileSync(join(root, p), s)
 const argv = process.argv.slice(2)
 const noBuild = argv.includes('--no-build')
 const publish = argv.includes('--publish')
+// 预演：只说清楚「会做什么」，不改文件、不提交、不推送。
+// 推 tag 会触发 CI 建出公开 Release，值得先看一眼再按
+const dryRun = publish && argv.includes('--dry-run')
 const level = argv.find((a) => ['patch', 'minor', 'major'].includes(a)) ?? 'patch'
 const explicit = argv.find((a) => /^\d+\.\d+\.\d+$/.test(a))
 
@@ -67,12 +70,31 @@ const version = nextVersion()
 // 留下一堆没提交的改动，比直接失败更难收拾
 if (publish) {
   const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim()
+  const tagged = execFileSync('git', ['tag', '-l', `v${version}`], { cwd: root, encoding: 'utf8' }).trim()
+
+  if (dryRun) {
+    console.log(`\n  预演：发 v${version}（当前 ${current}）\n`)
+    console.log(`    版本文件    package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json`)
+    console.log(`    同步 SDK    examples/hello、src-tauri/builtins/* 的 sdk.js`)
+    console.log(`    提交        git commit -m "release: v${version}"`)
+    console.log(`    打 tag      v${version}${tagged ? '（⚠️ 已存在，会被拒）' : ''}`)
+    console.log(`    推送        git push && git push --tags`)
+    console.log(`    之后        Actions 在 mac + Windows 编译、签名、上传、生成 update.json\n`)
+    if (dirty) {
+      console.log('    ⚠️ 工作区不干净，正式发版会被拦下，先提交或 stash：')
+      console.log(dirty.split('\n').map((l) => `        ${l}`).join('\n') + '\n')
+    } else {
+      console.log('    ✓ 工作区干净，可以发\n')
+    }
+    process.exit(0)
+  }
+
   if (dirty) {
     console.error('✗ 工作区不干净，先提交或 stash：\n')
     console.error(dirty.split('\n').map((l) => `    ${l}`).join('\n'))
     process.exit(1)
   }
-  if (execFileSync('git', ['tag', '-l', `v${version}`], { cwd: root, encoding: 'utf8' }).trim()) {
+  if (tagged) {
     console.error(`✗ tag v${version} 已经存在，说明这个版本发过了`)
     process.exit(1)
   }

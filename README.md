@@ -47,10 +47,15 @@ pnpm dev              # 只跑前端（vite，5183 端口）
 打包与发布：
 
 ```bash
-pnpm release                  # 升补丁号并打包，产物拷到桌面（用于本机自测）
-pnpm release minor            # 升次版本
-git tag v0.2.x && git push --tags   # 推 tag → CI 编 mac/Windows 包、签名、上传 Release
+pnpm release:publish          # 发版就这一条：升版本 → 提交 → 打 tag → 推送
+pnpm release:publish --dry-run    # 同上但只预演，不改文件不提交不推送
 ```
+
+推完 tag 后 GitHub Actions 自动接手：在 mac 和 Windows 上分别编译并**签名**，
+上传到 Release，再生成应用内更新用的 `update.json`。不用手动点任何按钮。
+
+想先在本机试用再发，用不带参数的 `pnpm release`（升版本 + 本机编译，产物拷到桌面）。
+`pnpm release minor` / `major` 升次版本 / 主版本。
 
 发布由 GitHub Actions 完成（mac + Windows 双平台、更新包带签名校验）。
 本地手工兜底：`pnpm publish-update`（本机构建+签名+上传）或 `pnpm sign-release`（只签名）。
