@@ -57,7 +57,7 @@ pub fn run() {
                 eprintln!("[knockbox] {e}");
             }
             // 内置轻应用要在第一次搜索之前就位，否则用户第一次唤起时搜不到
-            plugins::builtin::sync_all();
+            plugins::builtin::sync_all(app.handle());
             build_tray(app.handle())?;
             warm_cache(app.handle());
 

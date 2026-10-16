@@ -11,15 +11,16 @@
 use crate::core::manifest;
 use crate::plugins::store as plugin_store;
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 /// 内置轻应用的目录名（同时也是 plugin.json 里的 id）。
 pub const BUILTIN_IDS: &[&str] = &["com.knockbox.lock", "com.knockbox.screencap"];
 
 /// 同步全部内置轻应用。失败只记日志、不阻断启动 —— 内置轻应用挂了不该
 /// 让整个启动器打不开。
-pub fn sync_all() {
+pub fn sync_all(app: &tauri::AppHandle) {
     for id in BUILTIN_IDS {
-        match install_builtin(id) {
+        match install_builtin(app, id) {
             Ok(true) => eprintln!("[knockbox] 已同步内置轻应用 {id}"),
             Ok(false) => {}
             Err(e) => eprintln!("[knockbox] 同步内置轻应用 {id} 失败: {e}"),
@@ -28,12 +29,20 @@ pub fn sync_all() {
 }
 
 /// 把单个内置轻应用拷进插件目录。返回是否真的写了东西。
-fn install_builtin(id: &str) -> Result<bool, String> {
-    let src = resource_dir().join(id);
-    if !src.join(manifest::MANIFEST_FILE).is_file() {
-        // 资源目录里没有（开发时可能没打包），跳过而不是报错
+fn install_builtin(app: &tauri::AppHandle, id: &str) -> Result<bool, String> {
+    let dirs = candidate_dirs(app);
+    // 找不到时要说清楚试过哪些路径，否则"装完内置应用不见了"完全无从查起
+    let Some(src) = dirs
+        .iter()
+        .map(|d| d.join(id))
+        .find(|p| p.join(manifest::MANIFEST_FILE).is_file())
+    else {
+        eprintln!("[knockbox] 内置轻应用 {id} 的资源缺失，试过：");
+        for d in &dirs {
+            eprintln!("[knockbox]   {}", d.join(id).display());
+        }
         return Ok(false);
-    }
+    };
 
     let dest = plugin_store::plugin_dir(id);
 
@@ -75,26 +84,34 @@ fn ensure_pinned(id: &str) {
     }
 }
 
-/// 资源目录。打包后是 `Contents/Resources/builtins`，
-/// 开发时（`cargo run`）退回到工程里的 `src-tauri/builtins`。
-fn resource_dir() -> PathBuf {
+/// 内置轻应用资源的候选目录，按优先级排列。
+///
+/// 打包后（`bundle.resources: builtins/**/*`）：
+///   macOS   → `Knockbox.app/Contents/Resources/builtins/`
+///   Windows → 安装目录（可执行文件旁边）的 `builtins/`
+/// 开发时 → 工程里的 `src-tauri/builtins/`。
+///
+/// **用 Tauri 的 `resource_dir()`，不要自己按 macOS 的目录结构数父目录**：
+/// 之前写的是「从 exe 往上退 3 层再找 Resources」，那只在
+/// `Knockbox.app/Contents/MacOS/knockbox` 下成立。Windows 的 exe 在
+/// `安装目录\knockbox.exe`，退 3 层退到盘根，找不到就静默跳过 ——
+/// 结果是 Windows 用户装完**一个内置应用都没有**（截图和锁屏都不见了），
+/// 而且日志里什么都没有。
+///
+/// 第二个候选是资源目录本身（不带 `builtins/` 这一层）：万一 bundler 把
+/// glob 的前缀拍平了，也能找到。与其赌一种布局，不如两种都试。
+fn candidate_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
     if let Ok(dir) = std::env::var("KNOCKBOX_BUILTINS") {
-        return PathBuf::from(dir);
+        return vec![PathBuf::from(dir)];
     }
-    // std::env::current_exe -> .../Knockbox.app/Contents/MacOS/knockbox
-    if let Ok(exe) = std::env::current_exe() {
-        let mut p = exe.as_path();
-        // Contents/MacOS -> Contents -> .app
-        for _ in 0..3 {
-            p = p.parent().unwrap_or(p);
-        }
-        let candidate = p.join("Resources").join("builtins");
-        if candidate.is_dir() {
-            return candidate;
-        }
+    let mut dirs = Vec::new();
+    if let Ok(base) = app.path().resource_dir() {
+        dirs.push(base.join("builtins"));
+        dirs.push(base);
     }
     // 开发模式
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("builtins")
+    dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("builtins"));
+    dirs
 }
 
 /// 逐文件比较大小与内容。内置应用只有几个小文件，比校验和更省事。
