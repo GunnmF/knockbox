@@ -12,9 +12,9 @@
  *   pnpm release major        # 升主版本  0.2.0 -> 1.0.0
  *   pnpm release patch 0.3.0  # 直接指定版本号
  *   pnpm release --no-build   # 只升版本号，不编译
- *   pnpm release:publish      # **日常发版就这一条**：升版本 → 提交 → 打 tag →
- *                             #   推送，剩下交给 CI（编译/签名/上传/update.json）
- *   pnpm release:publish --dry-run   # 同上但只预演，不改文件不提交不推送
+ *   pnpm release:publish      # **发版就这一条**（在 dev 上跑）：升版本 + 提交。
+ *                             #   之后合并到 master 并推送，CI 自动编译签名发版
+ *   pnpm release:publish --dry-run   # 同上但只预演，不改文件不提交
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, copyFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
@@ -70,32 +70,34 @@ const version = nextVersion()
 // 留下一堆没提交的改动，比直接失败更难收拾
 if (publish) {
   const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim()
-  const tagged = execFileSync('git', ['tag', '-l', `v${version}`], { cwd: root, encoding: 'utf8' }).trim()
+  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim()
+  // 「这个版本是不是已经发过了」不再本地判断：线上有没有完整的 release 由 CI
+  // 自己查（.github/workflows/release.yml 的 prepare job），不完整的会重跑补齐
+  const onMaster = branch === 'master'
 
   if (dryRun) {
-    console.log(`\n  预演：发 v${version}（当前 ${current}）\n`)
+    console.log(`\n  预演：发 v${version}（当前 ${current}，分支 ${branch}）\n`)
     console.log(`    版本文件    package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json`)
     console.log(`    同步 SDK    examples/hello、src-tauri/builtins/* 的 sdk.js`)
     console.log(`    提交        git commit -m "release: v${version}"`)
-    console.log(`    打 tag      v${version}${tagged ? '（⚠️ 已存在，会被拒）' : ''}`)
-    console.log(`    推送        git push && git push --tags`)
-    console.log(`    之后        Actions 在 mac + Windows 编译、签名、上传、生成 update.json\n`)
+    console.log(`    之后        合并到 master 并推送 → CI 编译、签名、上传、`)
+    console.log(`                创建 tag v${version}、生成 update.json\n`)
     if (dirty) {
       console.log('    ⚠️ 工作区不干净，正式发版会被拦下，先提交或 stash：')
       console.log(dirty.split('\n').map((l) => `        ${l}`).join('\n') + '\n')
     } else {
       console.log('    ✓ 工作区干净，可以发\n')
     }
+    if (onMaster) console.log('    ⚠️ 当前就在 master 上：提交后直接 push origin master 就会发版\n')
     process.exit(0)
   }
 
   if (dirty) {
     console.error('✗ 工作区不干净，先提交或 stash：\n')
     console.error(dirty.split('\n').map((l) => `    ${l}`).join('\n'))
-    process.exit(1)
-  }
-  if (tagged) {
-    console.error(`✗ tag v${version} 已经存在，说明这个版本发过了`)
     process.exit(1)
   }
 }
@@ -116,26 +118,22 @@ console.log(`\n  版本号  ${current}  →  ${version}   (package.json / Cargo.
 
 const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
 
-// —— 发版：一条命令走完，剩下的交给 CI ——
-// 为什么不再本机编译：mac + Windows 两端都在 CI 编（见 .github/workflows/release.yml），
-// 本机构建只是多花几分钟给一个跟线上产物不一样的包。tag 一推，CI 接手编译、签名、
-// 上传和生成 update.json。
+// —— 发版：在 dev 上跑，升版本 + 提交，剩下交给 CI ——
+// 为什么不再本机编译、也不打 tag：mac + Windows 两端都在 CI 编
+// （.github/workflows/release.yml 只监听 master 的 push），tag 由 CI 在构建时
+// 创建并指向被编译的那个 commit —— 本地先打 tag 的话，tag 和实际发出去的代码
+// 很容易对不上（master 还会继续往前走）
 if (publish) {
-  const tag = `v${version}`
   // SDK 要跟着这次提交走：轻应用目录里的 sdk.js 是提交物
   syncSdk()
 
   git(['add', '-A'])
   execFileSync('git', ['commit', '-m', `release: v${version}`], { cwd: root, stdio: 'inherit' })
-  execFileSync('git', ['tag', '-a', tag, '-m', `v${version}`], { cwd: root, stdio: 'inherit' })
 
-  console.log(`\n  推送 master 和 ${tag} …`)
-  execFileSync('git', ['push'], { cwd: root, stdio: 'inherit' })
-  execFileSync('git', ['push', '--tags'], { cwd: root, stdio: 'inherit' })
-
-  console.log(`\n  ✓ v${version} 已推送\n`)
-  console.log('    Actions 会在 mac + Windows 上编译、签名、上传，并生成 update.json：')
-  console.log('    https://github.com/GunnmF/knockbox/actions\n')
+  console.log(`\n  ✓ v${version} 已提交\n`)
+  console.log('    接下来合并到 master 并推送，CI 会自动编译、签名、上传、发 tag：')
+  console.log('      git switch master && git merge dev && git push origin master')
+  console.log('    进度看 https://github.com/GunnmF/knockbox/actions\n')
   console.log('    想先在本机试用再发，跑不带 --publish 的 pnpm release。\n')
   process.exit(0)
 }

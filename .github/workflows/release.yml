@@ -1,9 +1,18 @@
 name: release
 
-# 打 tag 即发版：mac + Windows 都在 CI 里编译并**签名**，自动上传到 Release。
+# 推 master 即发版：mac + Windows 都在 CI 里编译并**签名**，自动上传到 Release。
 #
-# 为什么签名也放 CI：为了让发版只有「推 tag」一步。私钥存在 GitHub Actions
-# Secret 里（KNOCKBOX_UPDATER_KEY），值加密存储、界面上不显示。
+# 分支约定：平时在 dev 上开发，只有要出新版时才合并到 master。所以「推 master」
+# 等于「我要发版」，不需要再单独打 tag —— tag 由本 workflow 在构建时创建，
+# 指向被编译的那个 commit（本地打 tag 反而容易出现 tag 和实际构建的代码对不上）。
+#
+# 版本号来自 master 上 package.json 的 version，所以合并前必须先升版本：
+#   git switch dev && pnpm release:publish   # 升版本 + 提交
+#   git switch master && git merge dev && git push origin master
+#   → 本 workflow 编包 + 签名 + 上传 + 建 tag + 生成 update.json，全自动
+#
+# 为什么签名也放 CI：为了让发版只有「合并到 master」一步。私钥存在 GitHub
+# Actions Secret 里（KNOCKBOX_UPDATER_KEY），值加密存储、界面上不显示。
 # 代价与配套：secret 会在运行时注入环境变量，所以本 workflow 的第三方 action
 # **全部锁到 commit SHA**（不用 @v4 这种可被重新指向的 tag），权限压到最小
 # （只要 contents:write）。改动本 workflow 等同于交出私钥，review 时留意。
@@ -12,22 +21,49 @@ name: release
 #   Settings → Secrets and variables → Actions → New repository secret
 #   KNOCKBOX_UPDATER_KEY = ~/.tauri/knockbox.key 的**文件内容**
 #   （终端里 pbcopy < ~/.tauri/knockbox.key 直接复制）
-#
-# 流程：
-#   pnpm release            # 升版本 + 本机自测构建
-#   git commit -am v0.2.x && git tag v0.2.x && git push --tags
-#   → 本 workflow 编包 + 签名 + 上传 + 生成 update.json，全自动
 on:
   push:
-    tags: ['v*']
-  workflow_dispatch:
+    branches: [master]
+  workflow_dispatch: # 手动触发时用 master 的 HEAD 重新发一次当前版本
 
 permissions:
   contents: write # 创建 Release / 上传附件，除此之外一律不给
 
 jobs:
+  prepare:
+    name: 准备
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: check
+        name: 判断这次要不要真的发
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER=$(node -p "require('./package.json').version")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          # 推 master 未必都是发版（偶尔推个文档修正）。这个版本的 release
+          # 已经完整（update.json 也在）就跳过，省掉一次 5 分钟构建。
+          # 故意只看 update.json：上次发版中途挂了的话它不在，会重跑并补齐，
+          # 等于自带修复能力
+          NAMES=$(gh release view "v$VER" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if echo "$NAMES" | grep -qx update.json; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VER 已经发过了（update.json 在），本次跳过构建"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "准备发 v$VER"
+          fi
+
   macos:
     name: macOS (Apple Silicon)
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: macos-14
     # 私钥只给真正要用它的两个构建 job，第三个 job（生成 update.json）用不到
     # Secret 不存在时为空字符串，正好对应"私钥无密码"
@@ -46,17 +82,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
-      - name: 校验 tag 与版本号一致（手动触发时跳过）
-        run: |
-          VER=$(node -p "require('./package.json').version")
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME#v}"
-            echo "tag=$TAG version=$VER"
-            if [ "$TAG" != "$VER" ]; then echo "::error::tag 与 package.json 版本不一致"; exit 1; fi
-          else
-            echo "手动触发：用 package.json 的版本 v$VER"
-          fi
-
       - name: 构建（updater 产物由 tauri 用私钥直接签好）
         run: pnpm tauri build
 
@@ -65,15 +90,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # tag 一律取自 package.json 的版本号：手动触发时 GITHUB_REF_NAME
-          # 是分支名（master），拿它当 tag 会建出一个叫 master 的 release
-          VER=$(node -p "require('./package.json').version")
-          TAG="v$VER"
+          TAG="v${{ needs.prepare.outputs.version }}"
           # 产物是分目录的：
           #   bundle/macos/  → *.app、*.app.tar.gz（+ .sig）← updater 实际用的
           #   bundle/dmg/    → *.dmg（给人手动下载的）
           # 路径必须一路带目录：写成 $(cd "$B/dmg" && ls *.dmg) 的话 cd 之后的
-          # 相对路径只剩文件名，传给 gh 时是相对仓库根目录解析的，找不到文件
+          # 相对路径只剩文件名，传给 gh 时按工作目录解析的，找不到文件
           B=src-tauri/target/release/bundle
           TARBALL=$(ls "$B"/macos/*.app.tar.gz)
           if [ ! -f "$TARBALL" ] || [ ! -f "$TARBALL.sig" ]; then
@@ -81,12 +103,17 @@ jobs:
             exit 1
           fi
           DMGS=$(ls "$B"/dmg/*.dmg 2>/dev/null || true)
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          # --target 让 tag 精确落在被构建的这个 commit 上：master 后面还会继续
+          # 往前走，用默认分支 HEAD 建 tag 会标到没构建过的代码上
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --generate-notes
           gh release upload "$TAG" "$TARBALL" "$TARBALL.sig" $DMGS --clobber
           # 不写 GITHUB_OUTPUT：下游那个 job 会自己去 Release 上找产物和签名
 
   windows:
     name: Windows (x64)
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: windows-latest
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.KNOCKBOX_UPDATER_KEY }}
@@ -111,10 +138,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
-          $tag = "v" + (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "v${{ needs.prepare.outputs.version }}"
           $root = "src-tauri/target/release/bundle"
           # Windows 的 updater 产物就是 **NSIS 安装器 exe 本身 + .exe.sig**，
-          # 没有 zip（Tauri v1 才有 .nsis.zip，v2 去掉了）。找 *.zip 永远找不到。
+          # 没有 zip（Tauri v1 才是 .nsis.zip，v2 去掉了）。找 *.zip 永远找不到。
           $exe = Get-ChildItem "$root/nsis/*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $exe) { throw "没有找到 $root/nsis/*.exe，确认打包与 createUpdaterArtifacts" }
           if (-not (Test-Path "$($exe.FullName).sig")) { throw "缺少签名文件 $($exe.Name).sig" }
@@ -124,16 +151,14 @@ jobs:
           # 在 $ErrorActionPreference=Stop 下会把原生命令的 stderr 抛成终止性错误，
           # 这里用 try 包一层，只认 $LASTEXITCODE
           try { gh release view $tag *> $null } catch { }
-          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --generate-notes }
+          # --target 让 tag 精确落在被构建的这个 commit 上
+          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --target "$env:GITHUB_SHA" --generate-notes }
           gh release upload $tag @files --clobber
           # 同上：不写 GITHUB_OUTPUT
 
   publish-update-json:
     name: 生成 update.json
-    needs: [macos, windows]
-    # 显式声明依赖必须成功：点 "Re-run failed jobs" 时这个 job 也会被拉起来，
-    # 而那时 Release 上可能还没有产物
-    if: needs.macos.result == 'success' && needs.windows.result == 'success'
+    needs: [prepare, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -147,4 +172,5 @@ jobs:
       - name: 组装并上传 update.json（客户端只认这一个文件）
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.prepare.outputs.version }}
         run: node scripts/ci-publish-update-json.mjs

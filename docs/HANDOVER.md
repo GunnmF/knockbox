@@ -84,15 +84,22 @@
   重新生成：`npx tauri signer generate -w ~/.tauri/knockbox.key --ci`
 - **发版只有一步**（`.github/workflows/release.yml`，mac + Windows 都在 CI 里编包并签名）：
   ```
-  pnpm release:publish      # 升版本 → 同步 SDK → 提交 → 打 tag → 推送
+  git switch dev && pnpm release:publish    # 升版本 + 提交
+  git switch master && git merge dev && git push origin master
   ```
-  之后全程自动：CI 编包 → 用 Secret 里的私钥签名 → 上传产物 → 生成 update.json。
-  推 tag 前可以先 `pnpm release:publish --dry-run` 预演一遍（不改文件不提交不推送）。
-  脚本会先查工作区干不干净、tag 是否已存在，不干净就拒发 —— 免得把无关改动
-  一起打进发布提交。想先在本机试用再发，用不带参数的 `pnpm release`（升版本 +
-  本机编译，产物拷到桌面）
-- **推 master 也会跑 `.github/workflows/ci.yml`**：两端各编译一遍 + 单元测试，
-  用来在打 tag 之前就暴露跨平台编译问题（不要手动触发，它自己会跑）
+  推 master 之后全自动：CI 编包 → 用 Secret 里的私钥签名 → 上传产物 →
+  **创建 tag v\<版本\>（指向被构建的那个 commit）** → 生成 update.json。
+- **分支约定：dev 开发，master 只进发版**。所以「推 master」=「我要发版」，
+  推之前必须先升版本（版本号取自 master 上的 package.json）。tag 不在本地打 ——
+  master 还会继续往前走，本地先打的 tag 很容易和实际发出去的代码对不上；
+  CI 建 tag 时用 `--target $GITHUB_SHA` 精确落在被构建的 commit 上
+- **重复推 master 不会重复发版**：workflow 的 `prepare` job 会查当前版本的
+  release 里有没有 `update.json`，有就跳过构建（省 5 分钟），没有就照常跑 ——
+  上次发版中途挂掉的情况，再推一次就自动补齐了
+- **跨平台编译错误只能在发版时发现**（曾经有个 ci.yml 在每次推 master 时编译两端，
+  因为每次提交都要等 5 分钟已删除）。代价：编译不过就是 tag 推不上去、Release
+  半成品。缓解办法：`pnpm release:publish` 在 dev 上跑，本地 `cargo check` 过一遍
+  再合并；真炸了修完重推 master 即可（prepare 会重跑）
 - **Actions artifact ≠ Release**：artifact 要登录、90 天过期、updater 读不到；
   客户端要的是 Release 上那个匿名可下的 `update.json`。所以工作流直接传 Release，
   Actions artifact 只在需要人工看的时候用
@@ -126,9 +133,9 @@
 - **Windows 的编译错误只能在 Windows CI 上发现**。曾以为 `rustup target add
   x86_64-pc-windows-msvc` + `cargo check --target` 能在 mac 上交叉检查，**不行**：
   tauri 依赖树里有含 C 代码的 crate（如 `ring`），cc-rs 需要 MSVC 的 C 头文件，
-  换 GNU 目标也一样缺头文件。所以别指望本机验证，改为**在推 master 时就跑**：
-  `.github/workflows/ci.yml` 在两平台上 `pnpm tauri build --no-bundle` + `cargo test`，
-  不碰 Release 也不碰私钥。发版前的编译问题在这里就该暴露，而不是等 tag
+  换 GNU 目标也一样缺头文件。所以别指望本机验证 —— 只能在 Windows 真的构建时
+  才暴露（release.yml 的 windows job）。曾加过一个每次推 master 都编两端的
+  `ci.yml` 来提前暴露，代价是每次提交都要等 5 分钟，已按要求删除
 - **依赖别乱放进 `[target.'cfg(target_os = "macos")'.dependencies]`**：
   `walkdir`/`zip`/`sha2` 都曾是跨平台依赖却被归到 macOS 段（只有 `objc` 真是
   macOS 专属），Windows 编译直接 E0432/E0433「找不到 crate」。加新依赖时先问
@@ -365,9 +372,9 @@ cargo check && cargo test             # 10/10 通过
 > 23 这条和 21、22 一起说明同一件事：**发版链路上的每一环都要能被单独验证**。
 > 「上传成功」不等于「下游收到了」——这次的教训是没有中间那步的可见性。
 
-> 18–20 三条都是首次双平台 CI 才暴露的，根因是**此前只在 macOS 上编译过**。
-> 已加 `ci.yml`：推 master 就在 mac + Windows 上跑 `tauri build --no-bundle` + `cargo test`，
-> 不用等到打 tag 才发现编不过。
+> 18–20 三条都是首次双平台构建才暴露的，根因是**此前只在 macOS 上编译过**。
+> 当时为此加过一个每次推 master 都编译两端的 `ci.yml`，后来按「不提交就不该有
+> 编译开销」删掉了 —— 现在只有发版（推 master）才编译两端。
 
 ### 🔴 仍未做：权限逐条确认（最大的模型空洞）
 
@@ -391,9 +398,9 @@ cargo check && cargo test             # 10/10 通过
 - **`secret: true` 仍是明文**，且 `settings.get` 是 `AlwaysAllowed`
 - **托盘菜单的「设置…」只是 show 主窗口**，不会切到设置页
 - **`@knockbox/plugin-sdk` 未发布**；`examples/hello/sdk.js` 由 `tsc` 从 `src/sdk/index.ts` 同步而来
-- **Windows 运行时完全没验证过**：`ci.yml` 从 v0.2.11 起会在 Windows 上真的编译一遍
-  （能挡住跨平台编译错误），但**没人在 Windows 上跑过这个应用**——截图冻结帧、
-  多屏几何、托盘、快捷键在 Windows 上的实际行为都还是未知数
+- **Windows 运行时完全没验证过**：Windows 安装包已经发出去了（v0.2.10 有 exe/msi），
+  但**没人在 Windows 上跑过这个应用**——截图冻结帧、多屏几何、托盘、快捷键在
+  Windows 上的实际行为都还是未知数
 
 ### 🟡 环境坑（务必记住）
 

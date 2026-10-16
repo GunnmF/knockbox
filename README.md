@@ -47,15 +47,28 @@ pnpm dev              # 只跑前端（vite，5183 端口）
 打包与发布：
 
 ```bash
-pnpm release:publish          # 发版就这一条：升版本 → 提交 → 打 tag → 推送
-pnpm release:publish --dry-run    # 同上但只预演，不改文件不提交不推送
+pnpm release:publish          # 发版就这一条（在 dev 上跑）：升版本 + 提交
+pnpm release:publish --dry-run    # 同上但只预演，不改文件不提交
 ```
 
-推完 tag 后 GitHub Actions 自动接手：在 mac 和 Windows 上分别编译并**签名**，
-上传到 Release，再生成应用内更新用的 `update.json`。不用手动点任何按钮。
+完整流程是「开发在 dev，发版合并到 master」：
+
+```bash
+git switch dev
+pnpm release:publish                  # 升版本 + 提交
+git switch master && git merge dev
+git push origin master                # ← 这一推，GitHub Actions 自动接手
+```
+
+推完之后全自动：在 mac 和 Windows 上分别编译并**签名**，上传到 Release，
+创建对应的 tag，再生成应用内更新用的 `update.json`。不用手动打 tag，
+也不用点 Actions 页面上任何按钮。
 
 想先在本机试用再发，用不带参数的 `pnpm release`（升版本 + 本机编译，产物拷到桌面）。
 `pnpm release minor` / `major` 升次版本 / 主版本。
+
+推 master 但当前版本已经发过时，CI 会自动跳过构建（不会重复花 5 分钟）。
+如果上次发版中途挂了（`update.json` 没生成），再推一次 master 会自动补齐。
 
 发布由 GitHub Actions 完成（mac + Windows 双平台、更新包带签名校验）。
 本地手工兜底：`pnpm publish-update`（本机构建+签名+上传）或 `pnpm sign-release`（只签名）。
