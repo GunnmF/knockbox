@@ -1,0 +1,336 @@
+# 轻应用生态：需求与设计
+
+> 状态：**需求已确认，设计待拍板**。本文是这一轮架构调整的唯一依据，
+> 也是会话断了之后继续推进的入口。新窗口第一句话可以是：
+> 「读 `/Users/zxc/Desktop/Code/knockbox/docs/PLUGIN_ECOSYSTEM.md`，按里面的「迁移路径」继续。」
+>
+> 最后更新：2026-10-16
+
+---
+
+## 1. 要解决的问题
+
+一句话：**宿主不该是轻应用的作者**。
+
+现在 `截图` 和 `锁屏` 是宿主自带的内置轻应用，代码在 `src-tauri/builtins/` 下，
+跟着主程序一起打包、启动时自动安装。带来的问题：
+
+| 问题 | 现状 | 后果 |
+|---|---|---|
+| 宿主被具体业务拖累 | `screenshot.rs` 约 1000 行 Rust + `src/overlay/ScreenshotOverlay.tsx` 约 700 行前端，全是选区、标记、取色的交互细节 | 想加个「录屏」「长截图」「贴图」，都得改宿主代码、重新发版 |
+| 装完就有，用户没有选择的余地 | `builtin.rs` 在 `setup()` 里无条件同步并默认钉住 | 用户不想要截图功能也删不掉（只能去设置里禁用） |
+| 第三方插件和内置插件走同一条路却能力不对等 | 内置插件能用的一切，第三方都做不到 | 第三方开发者写不出有实用价值的插件 |
+
+**目标形态**：宿主只做三件事——**沙箱、能力网关、应用商店**。具体功能一律由插件实现。
+
+---
+
+## 2. 目标形态（已确认）
+
+1. **轻应用全部外置**，包括截图和锁屏。宿主仓库里不再有任何具体轻应用。
+2. **默认不预装**。装完 Knockbox 本体是"空手"的，用户需要去**应用商店**安装。
+3. **商店 = 一个仓库**。本质上就是"检查某个 GitHub 仓库里某个文件夹下的轻应用，
+   远程下载安装"，不是让用户手动下载 `.kbplugin` 包。
+4. **支持多个商店源**。官方源内置且默认启用；用户可以添加自己的源，
+   应用聚合所有源的列表并展示，可从任一源下载安装。
+5. **宿主不实现轻应用功能**，只暴露 API 和权限。插件自己实现（比如截图怎么选区、
+   怎么标记、取色怎么交互），需要什么权限自己声明。
+6. **插件有独立的运行生命周期**，见 §4。其中"后台运行"必须有用户可见的标识。
+
+---
+
+## 3. 商店源
+
+### 3.1 源长什么样
+
+一个源就是一个仓库（GitHub 或任何可 HTTP 访问的地址），结构：
+
+```
+knockbox-plugins/            ← 仓库根
+  index.json                 ← 源索引（列表页数据）
+  com.knockbox.screencap/     ← 每个插件一个顶层文件夹
+    plugin.json
+    index.html
+    sdk.js
+    icon.svg
+  com.knockbox.lock/
+    ...
+```
+
+`index.json` 的格式（**复用现有的 `install_from_registry` 解析逻辑**，
+`src-tauri/src/plugins/source.rs:75` 已经在按这个格式解析）：
+
+```json
+{
+  "name": "Knockbox 官方商店",
+  "plugins": [
+    {
+      "id": "com.knockbox.screencap",
+      "name": "截图",
+      "version": "3.0.0",
+      "description": "Snipaste 式区域截图",
+      "icon": "https://…/icon.svg",
+      "permissions": ["screen:capture", "window:overlay"],
+      "download": "https://github.com/…/com.knockbox.screencap-3.0.0.kbplugin",
+      "sha256": "…"
+    }
+  ]
+}
+```
+
+要点：
+- **索引里的 `permissions` 不可信**。安装时以插件包内 `plugin.json` 的声明为准，
+  索引里的只用于列表页展示图标和简介（PLUGIN_SPEC §7.3 已有这条规则，保持）。
+- **`sha256` 必填**。远程源的包必须校验，否则索引被篡改就能装进任意代码。
+  （现在 `install_from_registry` 是"索引给了才校验"，远程源应改为强制。）
+- 索引由 **CI 生成**（tag 或手动触发时扫目录、打包、算 sha256、生成 index.json 提交回去），
+  不手写。
+
+### 3.2 多源聚合
+
+用户可以添加多个源：
+
+| 项 | 规则 |
+|---|---|
+| 源的添加 | 设置里填 URL（和现在「从 Git 安装」同一个输入框），拉取 index.json 后校验格式 |
+| 列表展示 | 聚合所有源的插件，按名称排序；同 id 只保留一份 |
+| **id 冲突** | 两个源有同一个 `id` 但内容不同 → **以先添加的源为准**，后来者在列表里折叠成「其他源也提供该插件」，不覆盖 |
+| 源的禁用 | 用户可禁用某个源（不影响已安装的插件） |
+| 源的失败 | 拉取失败的源不影响其它源，列表里显示该源为"不可用"，可重试 |
+
+**为什么不做"多源优先级"**：多源体系最大的坑是 id 冲突导致"用户装的到底是哪个"。
+先添加者优先 + 明示冲突，比让用户去理解优先级规则简单得多。
+
+### 3.3 安装流程
+
+商店列表 → 点安装 → 拉 `.kbplugin`（校验 sha256）→ 解压 → `manifest::load` 全量校验
+→ **逐条展示权限让用户确认**（见 §7）→ 落盘 `plugins/<id>/`。
+
+---
+
+## 4. 生命周期与唤起方式
+
+这是本次新增的核心概念。现有 `plugin.json` 已有两个正交字段：
+
+- `activation`: `keyword`（关键词命中即接管面板）/ `manual`（仅手动点开）
+- `invocation`: `panel`（弹面板）/ `direct`（静默执行）
+
+在此之上增加两组。
+
+### 4.1 lifecycle —— 什么时候在运行
+
+| 值 | 含义 | 对应用户描述的场景 |
+|---|---|---|
+| `onDemand`（默认） | 被唤起时才创建页面 | 绝大多数工具型轻应用 |
+| `withHost` | 随主程序启动就初始化 | 截图：需要提前准备好冻结帧/快捷键监听 |
+| `background` | 常驻后台，宿主退出才结束 | 需要持续监听的小程序 |
+
+`background` 的硬性要求（缺一不可）：
+1. 用户**必须能看见它**。托盘菜单里列出所有后台运行的插件，可单独停止。
+2. 设置页的已安装列表里标「后台运行中」。
+3. 后台插件崩溃**不能拖垮宿主**——宿主侧要兜住。
+
+### 4.2 shortcuts —— 怎么被触发
+
+```json
+"shortcuts": [
+  { "key": "CmdOrCtrl+Shift+S", "description": "区域截图", "mode": "silent" },
+  { "key": "CmdOrCtrl+Shift+L", "description": "锁屏",       "mode": "silent" }
+]
+```
+
+| `mode` | 行为 | 对应用户描述的场景 |
+|---|---|---|
+| `silent` | 静默执行，**不唤醒主窗口** | 「截图用快捷键，不用唤醒主程序再选择截图」 |
+| `panel`（默认） | 唤醒主窗口并打开插件面板 | 「只是唤醒主程序执行」 |
+
+对 `direct` 类型的插件（如锁屏），`silent` 模式下执行完**宿主窗口保持隐藏**
+——这就是用户说的"执行完就可以直接关闭"。
+
+### 4.3 快捷键归属与冲突
+
+现在宿主只有**一个**全局快捷键（唤起主窗口）。插件要注册自己的，需要新增权限
+`system:hotkey`。规则：
+
+- **冲突检测**：注册失败时**回滚**并明确告诉用户"该组合键已被 XXX 占用"，
+  不能像现在注册主快捷键那样默默失败（`lib.rs::register_hotkey` 的教训）。
+- **主快捷键优先**：插件不能抢 `CmdOrCtrl+Shift+K`（默认唤起键）。
+- **插件快捷键必须可查**：设置页里每个已安装插件列出它注册的快捷键，
+  用户能改、能停。
+- 注册的快捷键**随插件启用/禁用/卸载**增删。
+
+---
+
+## 5. 宿主需要新增的能力
+
+### 5.1 新增权限（写入 `KNOWN_PERMISSIONS`）
+
+| 权限 | 用途 | 风险等级 |
+|---|---|---|
+| `system:hotkey` | 注册全局快捷键 | 高（劫持按键） |
+| `window:overlay` | 开一个覆盖全屏的置顶窗口承载自己的 UI | 高（全屏遮挡） |
+| `app:background` | 申请后台常驻 | 中（长期占用资源） |
+
+`app:background` 单独成一个权限而不是默认给——用户应当在安装时就决定要不要让它常驻。
+
+### 5.2 新增 API（`host::dispatch`）
+
+| 方法 | 说明 |
+|---|---|
+| `hotkey.register` / `hotkey.unregister` | 注册/注销插件快捷键，返回是否成功 + 被谁占用 |
+| `window.openOverlay` / `window.closeOverlay` | 开/关覆盖层窗口，加载插件自己的页面 |
+| `app.background` | 申请进入后台（需 `app:background` 权限 + 用户开启） |
+| `screen.capture({ mode: 'freeze' })` | **改造**：只截一张冻结帧返回给插件，不带任何 UI |
+
+### 5.3 `screen.capture` 的职责收缩
+
+现在 `mode: 'region'` 会驱动宿主自己的覆盖层 UI（`screenshot.rs::run_region_session` +
+`ScreenshotOverlay.tsx`），插件只管发一句话"截个图"。
+
+改造后 `screen.capture` **只负责产出图像**：
+
+```js
+const frame = await kb.screen.capture({ mode: 'freeze' })   // 返回 dataUrl 或临时文件路径
+await kb.window.openOverlay({ entry: 'overlay.html' })        // 插件自己的选区 UI
+await kb.screen.save(dataUrl, 'my-shot')                     // 落盘
+```
+
+宿主不再认识"选区""标记""取色"这些概念。
+
+---
+
+## 6. 最大的技术债：截图外置
+
+这一节单独写，因为它是整个改造里唯一真正难的部分，其余都是配置和搬运。
+
+### 6.1 现在的问题
+
+宿主的覆盖层窗口是**宿主自己的 React 页面**（`index.html?overlay=1` → `main.tsx`
+按 URL 参数分流渲染 `ScreenshotOverlay`）。插件页面跑在主窗口的 iframe 里，
+**没有办法在自己那边开一个置顶全屏窗口**。
+
+### 6.2 方案
+
+宿主保留一个**通用的**覆盖层窗口，但它的内容由插件决定：
+
+```
+window.openOverlay({ entry: 'overlay.html' })
+   ↓
+宿主开一个无边框置顶窗口（逻辑尺寸 = 当前屏幕），加载 index.html?overlay=1
+   ↓
+宿主的通用覆盖层页面按参数渲染 <iframe src="插件的 overlay.html">
+   ↓
+iframe 里的插件页面拿到冻结帧（screen.capture）自己画选区
+   ↓
+window.closeOverlay()
+```
+
+这样做的关键好处：**插件仍然活在 opaque origin 的 iframe 里**，不碰宿主 DOM，
+能力网关（`plugin_call` → `host::dispatch`）原样复用，不需要给插件开任何 Tauri
+capability。宿主只提供"一块全屏的画布"。
+
+### 6.3 需要搬运的代码
+
+| 现在在哪 | 搬到哪 | 说明 |
+|---|---|---|
+| `src/overlay/ScreenshotOverlay.tsx`（~700 行） | 商店仓库的 `com.knockbox.screencap/overlay.html` | 选区、标记、取色、工具栏的交互全归插件 |
+| `src/overlay/overlay.css` | 同上 | |
+| `src-tauri/src/screenshot.rs` 的 `run_region_session` | 宿主保留**通用会话管理**，去掉截图语义 | 冻结帧、开窗、回传结果、销毁窗口的骨架 |
+| `screenshot_begin/finish/cancel/copy_color` 四个 command | 变成插件可调用的 `kb.screen.*` 方法 | |
+| `src-tauri/builtins/com.knockbox.screencap/` | 商店仓库的 `com.knockbox.screencap/` | |
+| `src-tauri/builtins/com.knockbox.lock/` | 商店仓库的 `com.knockbox.lock/` | 锁屏改动少，可以先搬 |
+
+### 6.4 前端 API 的等价物
+
+插件现在用的是 `invoke('screenshot_begin')`（Tauri IPC）。外置后插件**拿不到
+Tauri IPC**（这是沙箱模型的核心），必须走 `kb.*` 的 postMessage 通道。
+所以 SDK 需要新增对应的方法，并且**先发布 `@knockbox/plugin-sdk`**
+（PLUGIN_SPEC §10 早就要求了，一直没做——现在是它的第一个真实用例）。
+
+---
+
+## 7. 安装时的权限确认（现存的最大模型空洞）
+
+PLUGIN_SPEC §4 要求「安装界面上逐条向用户展示即将授予的能力，由用户确认」。
+现在 `Settings.tsx` 只把它拼成一句「申请 N 项权限」，用户点一下就装完了——
+**用户从未真正授权过**，而 `check_permission` 查的永远是插件自己写的清单。
+
+外置商店之后这件事变得更要命：一个公开的第三方仓库，用户装了个带
+`system:hotkey` + `window:overlay` 的插件，还"后台常驻"，却全程没被问过一句。
+
+方案：
+- 新增 `granted-permissions.json`，记录每个插件**用户实际同意的**权限集合
+- 安装流程：解析 manifest → 逐条列出「这个插件要 xxx 能力 / 用途」→ 用户勾选 → 写入
+- `host::check_permission` 改查「已授予集合」，插件多要的能力一律拒绝
+- 卸载时一并删除；升级时若新版本**新增**权限，必须重新走确认流程（不能静默扩权）
+
+---
+
+## 8. 迁移路径
+
+分四阶段，**每阶段结束都能独立发布**，任何一阶段停下来产品都是可用的。
+
+### 阶段 1：宿主补齐能力（不破坏现状）
+
+- 加 `system:hotkey` / `window:overlay` / `app:background` 三个权限与对应 API
+- 加 `screen.capture({mode:'freeze'})`，**不动**现有的 region 分支
+- 实现通用覆盖层窗口（宿主页面只做「渲染插件 iframe」这一件事）
+- `builtin.rs` 保留（内置应用还在），但**改为默认不装**：
+  `plugin.json` 里标 `"builtin": true`，首次启动只登记不安装，管理页里显示「官方内置，点击安装」
+
+**产出**：宿主具备被外部插件驱动截图的全部能力，但没有任何功能因此改变。
+
+### 阶段 2：商店与多源
+
+- 源管理（增删、启用/禁用、聚合列表、id 冲突规则）
+- 商店页 UI（列表、图标、简介、一键安装、权限确认）
+- 索引由 CI 生成
+- 权限确认落地（§7）
+
+**产出**：用户能从商店装插件了；内置应用改成"可安装的官方插件"。
+
+### 阶段 3：截图、锁屏外置
+
+- 建 `GunnmF/knockbox-plugins` 仓库 + 生成索引的 CI
+- 把锁屏搬过去（改动小，先验证整条路）
+- 把截图搬过去（§6 的四个文件）
+- 删掉宿主里的 `src/overlay/ScreenshotOverlay.tsx` 和 `builtins/`
+- `screenshot.rs` 只保留通用会话管理
+
+**产出**：宿主里一行截图代码都没有了。
+
+### 阶段 4：发布 SDK + 生命周期收尾
+
+- 发布 `@knockbox/plugin-sdk`（截图是它的第一个真实用例）
+- `lifecycle` 三种模式全实现
+- 托盘菜单的后台插件列表 + 标识
+- 快捷键管理页（冲突提示、改键、停用）
+
+---
+
+## 9. 需要你拍板的问题
+
+1. **官方商店仓库放哪**：`GunnmF/knockbox-plugins`（和主程序同 org）还是别的？
+2. **主程序要不要保底预装截图**：完全不预装（干净，但新用户第一眼看不到亮点，
+   还得自己装），还是首次启动弹一次"要不要装官方截图/锁屏"？
+3. **`system:hotkey` 要不要更严**：比如只允许官方源（可签名的插件）注册全局快捷键，
+   第三方源只能注册"主窗口内"的快捷键。这会牺牲一部分开放性，换取不会被人劫持按键。
+4. **仓库源要不要支持分支/tag**：初版只跟仓库默认分支的最新版本，还是让用户在
+   商店页选版本（回退到旧版）？
+5. **崩溃隔离做到什么程度**：后台插件崩溃只记日志就够，还是每个插件跑在独立的
+   WebView 进程里（真隔离，但内存翻倍，和"轻量"的立项动机冲突）？
+
+---
+
+## 10. 相关文件索引
+
+| 文件 | 作用 |
+|---|---|
+| `docs/PLUGIN_SPEC.md` | 插件包格式与 API 规范（外置后需要扩写 lifecycle/shortcuts/overlay） |
+| `docs/HANDOVER.md` | 架构决策与踩坑记录 |
+| `src-tauri/src/plugins/host.rs` | 权限网关（`dispatch` / `requirement_for`） |
+| `src-tauri/src/plugins/source.rs` | 四种安装来源（目录/zip/git/registry） |
+| `src-tauri/src/plugins/builtin.rs` | 内置应用同步（阶段 1 后语义要变） |
+| `src-tauri/src/core/manifest.rs` | `plugin.json` 校验、`KNOWN_PERMISSIONS` |
+| `src/components/settings/AppsTab.tsx` | 现在只有「本地目录 / 安装包 / Git」三个入口 |
+| `src/sdk/index.ts` | 插件 SDK（发布前靠 `tsc` 手工同步到各插件目录） |

@@ -7,6 +7,16 @@
 
 ---
 
+## 0. 正在进行的大调整：轻应用外置
+
+**宿主不该是轻应用的作者。** 截图和锁屏要搬到独立的商店仓库，装完本体后从
+应用商店安装，宿主只留沙箱 + 能力网关 + 商店。
+
+需求与设计见 **[docs/PLUGIN_ECOSYSTEM.md](PLUGIN_ECOSYSTEM.md)**（含分阶段迁移路径和
+待拍板问题）。本文件 §6「仍未做」里与插件相关的条目，以那一份为准。
+
+---
+
 ## 1. 项目是什么
 
 **Knockbox（叩叩）** —— 一个跨平台（macOS + Windows）桌面启动器。
@@ -420,14 +430,17 @@ cargo check && cargo test             # 10/10 通过
 
 ## 7. 下一步（建议顺序）
 
-1. **补权限逐条确认流程** —— 见上，安全模型里最大的空洞
-2. **让 `notify` 真的发通知**，`pushResult` 真的渲染结果
-3. **`window.resize` 走权限校验** —— 现在任意插件都能把面板撑到 360px
-4. **实现速率限制** —— `PluginError::RateLimited` 有定义无产生点
-5. **发布 `@knockbox/plugin-sdk`**，之后删掉 `examples/hello/sdk.js` 的手工同步步骤
-6. **ARCHITECTURE.md** —— 尚未写，设计理由目前只散在代码注释里
-7. **README / CONTRIBUTING** —— 尚未写
-8. **Windows 打包验证** —— 目前只在 macOS 上开发过，`system_selection` 在 Windows 上返回空
+**主线是 [PLUGIN_ECOSYSTEM.md](PLUGIN_ECOSYSTEM.md) 的四阶段迁移**，下面的清单是
+主线之外或与之并行的杂项。阶段 2 的「权限逐条确认」既在这里也在线上，两件事是同一件。
+
+1. **宿主补齐能力**（阶段 1）：`system:hotkey` / `window:overlay` / `app:background`
+   三个权限 + 通用覆盖层窗口 —— 截图外置的前置条件，见 ECOSYSTEM §5
+2. **补权限逐条确认流程** —— 见上，安全模型里最大的空洞
+3. **让 `notify` 真的发通知**，`pushResult` 真的渲染结果
+4. **`window.resize` 走权限校验** —— 现在任意插件都能把面板撑到 360px
+5. **实现速率限制** —— `PluginError::RateLimited` 有定义无产生点
+6. **发布 `@knockbox/plugin-sdk`** —— 外置截图是它的第一个真实用例（阶段 4）
+7. **Windows 运行时验证** —— 安装包已发出，但没人在 Windows 上跑过这个应用
 
 ---
 
