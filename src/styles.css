@@ -136,6 +136,19 @@ input {
      放这里的话，算出来的窗口高度刚好少一个 padding，内容永远溢出出滚动条。 */
   padding: 0;
   min-height: 0;
+  /* 不画滚动条。
+     macOS 的滚动条是覆盖式的，滚动时才闪一下，看不见；Windows 的
+     WebView2 是经典滚动条，哪怕内容只多出一像素也常驻一条灰槽，在这个
+     圆角深色面板上尤其难看。滚轮和 ↑↓ 照常能滚，只是把提示条藏起来。
+     scrollbar-width 管 Gecko / 新版 Chromium，::-webkit-scrollbar 兜住
+     旧版 WebView2，两个都写才 everywhere 都干净。 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.kb-results::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .kb-group + .kb-group {

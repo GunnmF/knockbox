@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { search, type ResultItem } from './ipc'
+import { search, type ResultItem } from '../ipc'
 
 /**
  * 搜索输入的防抖查询。
@@ -7,8 +7,7 @@ import { search, type ResultItem } from './ipc'
  * 40ms 是刻意选的：低于它会让人感觉"输入和结果之间有粘滞感"，
  * 高于它在快速输入时会明显看到结果追不上键盘。
  * 内核侧已经做了打分和截断，这里的延迟纯粹是为了不重复打 IO。
- */
-/**
+ *
  * @param refreshToken 变了就重新查询一次。
  * 管理页里改了钉住/启用状态后，回到启动器必须刷新 —— 钉住列表只在
  * query 变化时才会重查，不给这个出口的话会一直显示取消钉住前的旧列表。
@@ -41,20 +40,4 @@ export function useSearch(query: string, refreshToken = 0) {
   }, [query, refreshToken])
 
   return { results, loading }
-}
-
-/** 键盘上下键维护选中项索引。index 由外部保持，便于和回车执行共用。 */
-export function useSelection(count: number) {
-  const [index, setIndex] = useState(0)
-
-  useEffect(() => {
-    setIndex((i) => (count === 0 ? 0 : Math.min(i, count - 1)))
-  }, [count])
-
-  const move = (delta: number) => {
-    if (count === 0) return
-    setIndex((i) => (i + delta + count) % count)
-  }
-
-  return { index, setIndex, move }
 }
