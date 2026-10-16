@@ -295,7 +295,11 @@ PLUGIN_SPEC §4 要求「安装界面上逐条向用户展示即将授予的能�
 - ✅ 快捷键注册表：主快捷键优先、插件间先到先得、跟随插件生命周期增删
 - ✅ `kb://hotkey-run` 分发：`silent` 不唤醒主窗口 / `panel` 唤醒并打开面板
 - ✅ `screen.capture({mode:'freeze'})`：只给一张干净的全屏图，不带 UI
-- ⬜ **通用覆盖层窗口**（`window.openOverlay`）：宿主页面只做「渲染插件 iframe」
+- ✅ **通用覆盖层窗口**（`window.openOverlay`）：宿主只开一块盖满全屏的画布，
+  里面装插件自己的页面。覆盖层页面按 `overlay_context` 知道自己该装谁，
+  渲染完调 `overlay_ready` 才显示（避免闪一帧空窗）；`overlay_finish` 带回结果。
+  消息桥与主窗口**共用同一份** `src/plugin/protocol.ts`（协议漂移 = 安全边界漂移）
+- ✅ 示例：`examples/overlay-demo`（装上就能点开，全链路可验证）
 - ⬜ `app:background` 的实际生效（托盘列表 + 设置页标识）
 - ⬜ `system:clipboard-watch` 的触发条件匹配
 - ⬜ 内置应用改为「默认不装，只登记」
