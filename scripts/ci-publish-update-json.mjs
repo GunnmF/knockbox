@@ -64,7 +64,18 @@ function resolveTag() {
 
 const tag = resolveTag()
 
-const relRes = await api(`/releases/tags/v${tag}`)
+/** 网络抽风时给一句人话，而不是甩一整串 undici 栈 */
+async function tryApi(path, init) {
+  try {
+    return await api(path, init)
+  } catch (e) {
+    console.error(`✗ 请求 GitHub 失败：${e.cause?.code ?? e.message}`)
+    console.error('  多半是网络问题（api.github.com 连不上），重跑一次即可')
+    process.exit(1)
+  }
+}
+
+const relRes = await tryApi(`/releases/tags/v${tag}`)
 if (!relRes.ok) {
   console.error(`✗ 找不到 release v${tag}（HTTP ${relRes.status}）`)
   console.error('  先确认 macOS / Windows 两个构建 job 跑完并把产物传上来了')
@@ -73,19 +84,27 @@ if (!relRes.ok) {
 const release = await relRes.json()
 
 const assets = release.assets ?? []
-// 同一个产物可能有带版本号和不带版本号两份（本地发过、CI 又传过），
-// 优先选带版本号的：它出现在用户看到的下载链接里
+const sigOf = (asset) => assets.find((a) => a.name === `${asset.name}.sig`)
+
+/**
+ * 挑产物。两个讲究：
+ *   1. 必须有配套的 .sig —— 同一个产物可能存在多份（本地发过、CI 又传过），
+ *      而本地那条路只把签名写进 update.json、没把 .sig 传上去。挑没签名的那份
+ *      会让 update.json 指向一个无法校验的包
+ *   2. 同等条件下优先带版本号的名字，它会出现在用户看到的下载链接里
+ */
 const find = (re) => {
   const hits = assets.filter((a) => re.test(a.name) && !a.name.endsWith('.sig'))
-  return hits.find((a) => a.name.includes(tag)) ?? hits[0]
+  const signed = hits.filter((a) => sigOf(a))
+  const pool = signed.length ? signed : hits
+  return pool.find((a) => a.name.includes(tag)) ?? pool[0]
 }
-const sigOf = (asset) => assets.find((a) => a.name === `${asset.name}.sig`)
 
 /** 下载 .sig 文件的内容（它就是 update.json 里要写的那段 base64 签名） */
 async function signatureOf(asset) {
   const sig = sigOf(asset)
   if (!sig) return null
-  const res = await api(`/releases/assets/${sig.id}`, {
+  const res = await tryApi(`/releases/assets/${sig.id}`, {
     headers: { Accept: 'application/octet-stream' },
   })
   if (!res.ok) {
@@ -97,16 +116,25 @@ async function signatureOf(asset) {
 
 const platforms = {}
 
+/** 报错时把 Release 上有什么列出来：否则「找不到 xxx」根本无从下手 */
+const listAssets = () => {
+  console.error(`  Release v${tag} 现有资产：`)
+  for (const a of assets) console.error(`    ${a.name}`)
+  console.error('  （*.sig 是签名文件，必须和产物成对出现）')
+}
+
 const mac = find(/\.app\.tar\.gz$/)
 if (mac) {
   const signature = await signatureOf(mac)
   if (!signature) {
     console.error(`✗ 找不到 ${mac.name}.sig，签名产物没传上来`)
+    listAssets()
     process.exit(1)
   }
   platforms['darwin-aarch64'] = { signature, url: mac.browser_download_url }
 } else {
   console.error('✗ Release 上没有 *.app.tar.gz（macOS job 没跑成功？）')
+  listAssets()
   process.exit(1)
 }
 
@@ -144,16 +172,28 @@ if (dryRun) {
   process.exit(0)
 }
 
-if (existing) await api(`/releases/assets/${existing.id}`, { method: 'DELETE' })
-
-const upload = await api(
-  `/releases/${release.id}/assets?name=update.json`,
-  {
+// 上传资产走的是 uploads.github.com，**不是** api.github.com —— 用错 host 会 404
+const uploadAsset = () =>
+  fetch(`https://uploads.github.com/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=update.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(updateJson, null, 2),
-  },
-)
+  })
+
+// **先传，传不动才删旧的**。反过来做（先删后传）的话，一旦上传失败，
+// Release 上就一个 update.json 都不剩 —— 客户端读不到文件会直接报错，
+// 而不是「已是最新」。GitHub 对重名返回 422，只有那一种情况才需要删。
+let upload = await uploadAsset()
+if (upload.status === 422 && existing) {
+  console.log('  已存在同名 update.json，删掉重传')
+  await tryApi(`/releases/assets/${existing.id}`, { method: 'DELETE' })
+  upload = await uploadAsset()
+}
 
 if (!upload.ok) {
   console.error(`✗ 上传 update.json 失败（HTTP ${upload.status}）`)
