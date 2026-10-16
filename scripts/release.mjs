@@ -168,7 +168,7 @@ function syncSdk() {
   const built = join(out, 'index.js')
   if (!existsSync(built)) throw new Error('SDK 编译产物不存在')
 
-  const targets = [join(root, 'examples/hello')]
+  const targets = [join(root, 'examples/hello'), join(root, 'examples/overlay-demo')]
   const builtins = join(root, 'src-tauri/builtins')
   if (existsSync(builtins)) {
     for (const id of readdirSync(builtins)) targets.push(join(builtins, id))

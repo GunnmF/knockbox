@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>覆盖层</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        cursor: crosshair;
+        user-select: none;
+      }
+      #hint {
+        position: fixed;
+        left: 50%;
+        top: 24px;
+        transform: translateX(-50%);
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.62);
+        color: #fff;
+        font: 12px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+      }
+      #frame {
+        position: fixed;
+        border: 1px solid #4a9eff;
+        background: rgba(74, 158, 255, 0.18);
+        pointer-events: none;
+      }
+      #frame::after {
+        content: attr(data-size);
+        position: absolute;
+        left: 0;
+        top: -20px;
+        padding: 1px 6px;
+        background: #4a9eff;
+        color: #fff;
+        font: 11px/1.5 system-ui, sans-serif;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hint">拖动框选 · Esc 取消 · 框好后按 Enter 确认</div>
+    <div id="frame" hidden></div>
+    <script type="module" src="./overlay.js"></script>
+  </body>
+</html>

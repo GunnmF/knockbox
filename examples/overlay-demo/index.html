@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>覆盖层示例</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: rgba(255, 255, 255, .7);
+        font: 13px/1.7 -apple-system, "PingFang SC", system-ui, sans-serif;
+      }
+      button {
+        font: inherit;
+        color: #fff;
+        background: rgba(74, 158, 255, .9);
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="open">打开覆盖层</button>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "id": "com.example.overlaydemo",
+  "name": "覆盖层示例",
+  "version": "1.0.0",
+  "description": "演示 window.openOverlay：宿主只给一块全屏画布，界面全是这个轻应用自己画的",
+  "entry": "index.html",
+  "author": "knockbox",
+  "invocation": "direct",
+  "keywords": ["覆盖层", "overlay", "示例"],
+  "permissions": ["window:overlay", "screen:capture"]
+}
