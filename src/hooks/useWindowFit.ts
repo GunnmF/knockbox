@@ -31,6 +31,18 @@ export function useWindowFit(
 ) {
   const settingsSized = useRef(0) // 管理页已经请求过的高度，0 = 还没定过
 
+  // 高度自适应失败过一次就彻底查不到了：invoke 的错误被 .catch(() => {})
+  // 吞掉，窗口纹丝不动，界面上看不出任何异常。这里留一句日志，
+  // 至少能在控制台里看到"要多少 / 现在多少 / 差多少 / 报什么"
+  const resize = (delta: number, desired: number) => {
+    void resizeWindow(delta).catch((e) => {
+      console.warn(
+        `[knockbox] 窗口高度自适应失败：想要 ${desired}px，视口 ${window.innerHeight}px，` +
+          `delta=${delta.toFixed(1)}，错误：${e}`,
+      )
+    })
+  }
+
   useEffect(() => {
     if (view === 'settings') {
       // 已经请求过这个高度就别再发一次 —— StrictMode 会重复跑 effect，
@@ -39,7 +51,7 @@ export function useWindowFit(
       const delta = SETTINGS_HEIGHT - window.innerHeight
       if (Math.abs(delta) < 1) return
       settingsSized.current = SETTINGS_HEIGHT
-      void resizeWindow(delta).catch(() => {})
+      resize(delta, SETTINGS_HEIGHT)
       return
     }
     // 回到启动器后要能重新贴合内容，下次进设置页也才不会被这个标记挡住
@@ -65,7 +77,7 @@ export function useWindowFit(
       const desired = chrome + Math.ceil(content.getBoundingClientRect().height)
       const delta = desired - window.innerHeight
       if (Math.abs(delta) < 1) return
-      void resizeWindow(delta).catch(() => {})
+      resize(delta, desired)
     }
 
     fit()

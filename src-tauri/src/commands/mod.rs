@@ -327,8 +327,12 @@ pub fn resize_window(app: AppHandle, delta: f64) -> Result<f64, String> {
     // 下面永远挂着一块空盒子 —— 前端明明量出只要 90px，却被这里挡回去了。
     let min_h = 88.0;
 
+    // 必须读 **inner_size**：下面的 set_size 设的也是内框（winit 侧是
+    // set_inner_size）。拿外框当基准的话，Windows 上 WebView2 的窗口边框会
+    // 让每次计算多出几像素余量，窗口比内容高出来一截。
+    // 前端传的 delta 是按 window.innerHeight 算的，也只对得上内框。
     let current = win
-        .outer_size()
+        .inner_size()
         .map_err(|e| e.to_string())?
         .height as f64
         / scale;
@@ -339,7 +343,7 @@ pub fn resize_window(app: AppHandle, delta: f64) -> Result<f64, String> {
     }
 
     win.set_size(tauri::LogicalSize::new(
-        win.outer_size().map_err(|e| e.to_string())?.width as f64 / scale,
+        win.inner_size().map_err(|e| e.to_string())?.width as f64 / scale,
         target,
     ))
     .map_err(|e| e.to_string())?;
