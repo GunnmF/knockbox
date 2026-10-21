@@ -33,12 +33,11 @@ export function useWindowFit(
 
   // 高度自适应失败过一次就彻底查不到了：invoke 的错误被 .catch(() => {})
   // 吞掉，窗口纹丝不动，界面上看不出任何异常。这里留一句日志，
-  // 至少能在控制台里看到"要多少 / 现在多少 / 差多少 / 报什么"
-  const resize = (delta: number, desired: number) => {
-    void resizeWindow(delta).catch((e) => {
+  // 至少能在控制台里看到"要多少 / 现在多少 / 报什么"
+  const resize = (desired: number) => {
+    void resizeWindow(desired).catch((e) => {
       console.warn(
-        `[knockbox] 窗口高度自适应失败：想要 ${desired}px，视口 ${window.innerHeight}px，` +
-          `delta=${delta.toFixed(1)}，错误：${e}`,
+        `[knockbox] 窗口高度自适应失败：想要 ${desired}px，视口 ${window.innerHeight}px，错误：${e}`,
       )
     })
   }
@@ -48,10 +47,9 @@ export function useWindowFit(
       // 已经请求过这个高度就别再发一次 —— StrictMode 会重复跑 effect，
       // 而 resizeWindow 走的是 IPC，每次都是真实往返。
       if (settingsSized.current === SETTINGS_HEIGHT) return
-      const delta = SETTINGS_HEIGHT - window.innerHeight
-      if (Math.abs(delta) < 1) return
+      if (Math.abs(SETTINGS_HEIGHT - window.innerHeight) < 1) return
       settingsSized.current = SETTINGS_HEIGHT
-      resize(delta, SETTINGS_HEIGHT)
+      resize(SETTINGS_HEIGHT)
       return
     }
     // 回到启动器后要能重新贴合内容，下次进设置页也才不会被这个标记挡住
@@ -71,13 +69,16 @@ export function useWindowFit(
       for (const sel of ['.kb-panel', '.kb-error', '.kb-footer']) {
         chrome += (document.querySelector(sel) as HTMLElement | null)?.offsetHeight ?? 0
       }
+      // .kb-window 是 border-box，上下各 1px 边框吃掉的也是视口高度，
+      // 不补上的话内容永远差 2px，结果区被迫溢出滚动。
+      const win = document.querySelector('.kb-window') as HTMLElement | null
+      const borders = win ? win.offsetHeight - win.clientHeight : 0
       // 必须向上取整：offsetHeight 是四舍五入的整像素，内容实际可能是 95.4，
       // 取整成 95 之后窗口刚好差那 0.4px —— overflow-y:auto 会为此画出一条
       // 明明"没东西"的滚动条。
-      const desired = chrome + Math.ceil(content.getBoundingClientRect().height)
-      const delta = desired - window.innerHeight
-      if (Math.abs(delta) < 1) return
-      resize(delta, desired)
+      const desired = chrome + borders + Math.ceil(content.getBoundingClientRect().height)
+      if (Math.abs(desired - window.innerHeight) < 1) return
+      resize(desired)
     }
 
     fit()

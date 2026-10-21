@@ -314,13 +314,18 @@ pub fn save_settings(app: AppHandle, settings: GlobalSettings) -> Result<(), Str
 
 /// 让窗口高度跟着结果条数走。
 ///
-/// 前端算出「内容比当前视口多/少了多少像素」传进来，这里只负责夹在
+/// 前端算出「窗口内框应该是多少像素」传进来（**绝对值**），这里只负责夹在
 /// 合理范围内 —— 上限跟着**当前屏幕**的高度走，不能写死：小屏笔记本上
 /// 塞满 520px 会直接顶出屏幕。
 ///
+/// 为什么是绝对值而不是增量：前端的 fit 会在几毫秒内重复触发（effect 直调 +
+/// ResizeObserver 初始通知），增量协议下第二次调用读到的"当前高度"已经是
+/// 第一次改过的值，增量被应用两次，向下会直接顶到 min_h 卡死 —— 列表被裁
+/// 且内容不再变化就永远不自愈。绝对值下重复调用是幂等的 no-op。
+///
 /// 返回实际生效的高度，前端拿它去判断"已经到顶了没有"，避免反复调用。
 #[tauri::command]
-pub fn resize_window(app: AppHandle, delta: f64) -> Result<f64, String> {
+pub fn resize_window(app: AppHandle, height: f64) -> Result<f64, String> {
     let Some(win) = app.get_webview_window("main") else {
         return Err("找不到主窗口".into());
     };
@@ -341,14 +346,14 @@ pub fn resize_window(app: AppHandle, delta: f64) -> Result<f64, String> {
     // 必须读 **inner_size**：下面的 set_size 设的也是内框（winit 侧是
     // set_inner_size）。拿外框当基准的话，Windows 上 WebView2 的窗口边框会
     // 让每次计算多出几像素余量，窗口比内容高出来一截。
-    // 前端传的 delta 是按 window.innerHeight 算的，也只对得上内框。
+    // 前端传的 height 是按 window.innerHeight 算的，也只对得上内框。
     let current = win
         .inner_size()
         .map_err(|e| e.to_string())?
         .height as f64
         / scale;
 
-    let target = (current + delta).clamp(min_h, max_h);
+    let target = height.clamp(min_h, max_h);
     if (target - current).abs() < 0.5 {
         return Ok(current);
     }

@@ -147,10 +147,14 @@ export async function installUpdate(
 export const relaunchApp = (): Promise<void> => relaunch()
 
 /**
- * 让窗口高度跟着内容走。传入「内容比当前视口多/少了多少像素」，
+ * 让窗口高度跟着内容走。传入「窗口内框应该是多少像素」（绝对值，不是增量），
  * Rust 侧会夹在屏幕高度的合理区间内，返回实际生效的高度。
+ *
+ * 必须传绝对值：fit 会在几毫秒内重复触发（effect 直调 + ResizeObserver 初始
+ * 通知），传增量的话第二次调用读到的是第一次已经改过的高度，增量被应用两次，
+ * 向下会直接顶到高度下限卡死（列表被裁且不再自愈）。绝对值重复调用是 no-op。
  */
-export const resizeWindow = (delta: number) => invoke<number>('resize_window', { delta })
+export const resizeWindow = (height: number) => invoke<number>('resize_window', { height })
 
 export const pluginList = () => invoke<InstalledPlugin[]>('plugin_list')
 export const pluginInstallDir = (path: string) => invoke<InstallResult>('plugin_install_dir', { path })
